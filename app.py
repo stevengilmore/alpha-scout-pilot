@@ -23,19 +23,38 @@ capital = st.sidebar.number_input("Trading Capital (€)", value=2500)
 profit_target = 20 # Our €20 goal
 
 import pandas as pd
+import pandas as pd # Ensure this is at the VERY top of the file
+
 @st.cache_data(ttl=60)
 def get_market_data(symbol):
-    # This fetches the data and automatically cleans the columns
+    # 1. Fetch data with auto_adjust to keep columns simple
     df = yf.download(symbol, period="5d", interval="5m", auto_adjust=True)
     
-    # This "flattens" the data so 'Close' is easy for the bot to read
+    # 2. Fix the "Multi-Index" issue (The Ticker Name 'drawer' issue)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     
-    # Calculate indicators
+    # 3. Calculate Indicators using pandas_ta
     df['EMA_200'] = ta.ema(df['Close'], length=200)
     df['RSI'] = ta.rsi(df['Close'], length=14)
     return df
+
+# --- THE LOGIC PART ---
+data = get_market_data(ticker)
+
+# Check if we actually got data back
+if not data.empty:
+    curr = data.iloc[-1]
+    
+    # We use .item() or float() to ensure we are comparing numbers, not lists
+    price = float(curr['Close'])
+    ema = float(curr['EMA_200'])
+    rsi = float(curr['RSI'])
+
+    trend_ok = price > ema
+    rsi_ok = rsi < 40
+    
+    # (The rest of your probability score code...)
 
 # --- 3. PROBABILITY CALCULATION ---
 # Gate 1: Trend Filter (Are we above the 200 EMA?)
