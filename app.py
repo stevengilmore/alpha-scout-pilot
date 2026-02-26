@@ -17,11 +17,6 @@ genai.configure(api_key=GEMINI_KEY)
 # Try this if the first one doesn't work:
 model = genai.GenerativeModel('gemini-3-flash-preview')
 
-# Add this to your sidebar to find the correct model name
-if st.sidebar.button("📋 List Available Models"):
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            st.sidebar.write(m.name)
 
 # --- 1. SETTINGS & STYLING ---
 st.set_page_config(page_title="Alpha Scout Pro", page_icon="🛡️", layout="wide")
@@ -213,6 +208,19 @@ with st.sidebar:
     st.divider()
     st.subheader("🛠️ Developer Tools")
     test_mode = st.toggle("Enable Test Mode", help="Bypasses technical filters for demo purposes.")
+
+with st.sidebar:
+    st.divider()
+    if st.button("📋 List My Available Models"):
+        try:
+            # Use the correct SDK method to list available models
+            models = [m.name for m in genai.list_models() 
+                     if 'generateContent' in m.supported_generation_methods]
+            st.write("### Your Active Models:")
+            for m_name in models:
+                st.code(m_name.replace('models/', ''))
+        except Exception as e:
+            st.error(f"Error fetching models: {e}")
 
 # --- 🤖 UNIFIED AGENT EXECUTION CENTER ---
 st.divider()
