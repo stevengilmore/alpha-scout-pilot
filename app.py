@@ -25,14 +25,14 @@ profit_target = 20 # Our €20 goal
 import pandas as pd
 @st.cache_data(ttl=60)
 def get_market_data(symbol):
-    # We add 'auto_adjust=True' and 'multi_level_download=False' to keep it simple
-    df = yf.download(symbol, period="5d", interval="5m", auto_adjust=True, multi_level_download=False)
+    # This fetches the data and automatically cleans the columns
+    df = yf.download(symbol, period="5d", interval="5m", auto_adjust=True)
     
-    # This line ensures we don't have a 'Multi-Index' headache
+    # This "flattens" the data so 'Close' is easy for the bot to read
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-        
-    # Professional Indicators
+    
+    # Calculate indicators
     df['EMA_200'] = ta.ema(df['Close'], length=200)
     df['RSI'] = ta.rsi(df['Close'], length=14)
     return df
