@@ -7,134 +7,102 @@ from google import genai
 from google.genai import types
 
 # --- 1. SETTINGS & SECRETS ---
-st.set_page_config(page_title="Alpha Scout Pro", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Alpha Scout Command", page_icon="🛰️", layout="wide")
 
 GEMINI_KEY = st.secrets.get("GEMINI_KEY")
 TG_TOKEN = st.secrets.get("TG_TOKEN")
 CHAT_ID = st.secrets.get("CHAT_ID")
 
-# --- 2. THE GLOBAL WATCHLIST ---
 ASSET_MAP = {
-    # Cryptocurrencies
-    "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "XRP-USD": "XRP", "BNB-USD": "Binance Coin", "SOL-USD": "Solana",
-    # S&P 10 (US Mega-Caps)
-    "NVDA": "NVIDIA Corp", "AAPL": "Apple Inc.", "MSFT": "Microsoft Corp", 
-    "AMZN": "Amazon.com Inc.", "GOOGL": "Alphabet Inc.", "META": "Meta Platforms", 
-    "AVGO": "Broadcom Inc.", "TSLA": "Tesla Inc.", "BRK-B": "Berkshire Hathaway", "LLY": "Eli Lilly & Co.",
-    # European Anchors
-    "AZN.L": "AstraZeneca", "HSBA.L": "HSBC Holdings", "SHEL.L": "Shell PLC", "SAP.DE": "SAP SE", "ALV.DE": "Allianz SE"
+    "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "NVDA": "NVIDIA", "AAPL": "Apple",
+    "MSFT": "Microsoft", "TSLA": "Tesla", "AZN.L": "AstraZeneca", "SAP.DE": "SAP SE"
 }
 
-# --- 3. DATA & ANALYSIS ENGINES ---
-@st.cache_data(ttl=300)
-def get_market_pulse():
-    pulse_data = []
-    for ticker in list(ASSET_MAP.keys()):
+# --- 2. THE SIGNAL ENGINE ---
+def get_signals():
+    signals = []
+    for ticker, name in ASSET_MAP.items():
         try:
-            df = yf.download(ticker, period="1mo", interval="1d", progress=False)
-            if not df.empty and len(df) > 1:
-                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-                change = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
-                pulse_data.append({"Ticker": ticker, "Change": float(change)})
+            df = yf.download(ticker, period="2y", interval="1d", progress=False)
+            if df.empty or len(df) < 200: continue
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+            
+            df['EMA_200'] = ta.ema(df['Close'], length=200)
+            df['RSI'] = ta.rsi(df['Close'], length=14)
+            curr = df.iloc[-1]
+            
+            # Position Logic
+            pos_type = "LONG 🟢" if curr['Close'] > curr['EMA_200'] else "SHORT 🔴"
+            
+            # Score (Feb 26, 2026 Market Sensitivity)
+            score = 70
+            if pos_type == "LONG 🟢" and curr['RSI'] < 45: score += 20
+            if pos_type == "SHORT 🔴" and curr['RSI'] > 55: score += 20
+            
+            signals.append({
+                "Asset": name, "Ticker": ticker, "Price": round(curr['Close'], 2),
+                "Position": pos_type, "Score": score
+            })
         except: continue
-    return pd.DataFrame(pulse_data).sort_values(by="Change", key=abs, ascending=False)
+    return pd.DataFrame(signals).sort_values(by="Score", ascending=False)
 
-def get_technical_analysis(ticker):
-    df = yf.download(ticker, period="2y", interval="1d", progress=False, auto_adjust=True)
-    if df.empty or len(df) < 250: return "NEUTRAL", 0, 0, pd.DataFrame()
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-    
-    df['EMA_200'] = ta.ema(df['Close'], length=200)
-    df['RSI'] = ta.rsi(df['Close'], length=14)
-    df.dropna(subset=['EMA_200', 'RSI'], inplace=True)
-    
-    if df.empty: return "NEUTRAL", 0, 0, pd.DataFrame()
-    curr = df.iloc[-1]
-    price, ema, rsi = float(curr['Close']), float(curr['EMA_200']), float(curr['RSI'])
-    
-    direction = "LONG (🟢 Buy)" if price > ema else "SHORT (🔴 Sell)"
-    score = 65 
-    if (direction.startswith("LONG") and rsi < 45) or (direction.startswith("SHORT") and rsi > 55):
-        score += 15
-    return direction, score, price, df
+# --- 3. UI: TOP SUMMARY ---
+st.title("🛰️ Alpha Scout: Top Picks (Feb 26, 2026)")
+all_signals = get_signals()
 
-# --- 4. UI LAYOUT & SIDEBAR ---
-st.title("🛡️ Alpha Scout: Command & Sentiment")
+# Highlight Top 3 "Buy Now"
+top_cols = st.columns(3)
+for i, row in enumerate(all_signals.head(3).to_dict('records')):
+    with top_cols[i]:
+        st.metric(f"{row['Asset']} ({row['Position']})", f"${row['Price']}", f"Confidence: {row['Score']}%")
+        if st.button(f"Analyze {row['Ticker']}", key=f"btn_{row['Ticker']}"):
+            st.session_state['selected_ticker'] = row['Ticker']
 
+st.divider()
+
+# --- 4. TELEGRAM DEBUGGER ---
 with st.sidebar:
-    st.header("🔥 Market Pulse")
-    movers = get_market_pulse()
-    if not movers.empty:
-        for _, row in movers.head(5).iterrows():
-            color = "green" if row['Change'] > 0 else "red"
-            st.markdown(f"**{row['Ticker']}**: :{color}[{round(row['Change'], 2)}%]")
-    
-    st.divider()
-    st.subheader("🧪 7-Day Simulation")
-    st.info("Performance at 75% Threshold:")
-    c1, c2 = st.columns(2)
-    c1.metric("Signals", "14")
-    c2.metric("Vetoes", "9")
-    
-    st.divider()
-    threshold = st.slider("Sensitivity Threshold %", 50, 95, 75)
-    test_mode = st.toggle("Enable AI Test Mode")
+    st.header("🔧 Debugger")
+    if st.button("📱 Test Telegram Connection"):
+        test_url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        test_res = requests.post(test_url, data={"chat_id": CHAT_ID, "text": "🔔 SCOUT TEST: Connection Successful!"})
+        if test_res.status_code == 200: st.success("Message Sent! Check Phone.")
+        else: st.error(f"Error {test_res.status_code}: {test_res.text}")
 
-# Main Logic
-selected_ticker = st.selectbox("Select Target", list(ASSET_MAP.keys()))
-trade_dir, prob_score, current_price, full_df = get_technical_analysis(selected_ticker)
+# --- 5. THE AGENT DEBATE (Bull vs. Bear) ---
+target = st.session_state.get('selected_ticker', "NVDA")
+st.subheader(f"🤖 Agentic Debate: {ASSET_MAP[target]}")
 
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    if trade_dir != "NEUTRAL":
-        st.subheader(f"📊 {ASSET_MAP[selected_ticker]} Analysis")
-        st.metric("Directional Bias", trade_dir, f"{prob_score}% Confidence")
-        st.line_chart(full_df[['Close', 'EMA_200']])
-    else:
-        st.error("⚠️ Data connection weak. Please select a different asset.")
-
-with col2:
-    st.subheader("🤖 AI Agent Swarm")
-    if st.button("🚀 ACTIVATE AUDIT"):
-        if trade_dir == "NEUTRAL" and not test_mode:
-            st.error("Technical analysis failed.")
-        elif prob_score >= threshold or test_mode:
-            with st.status("Grounded Audit + Sentiment Scan...", expanded=True) as status:
-                try:
-                    client = genai.Client(api_key=GEMINI_KEY)
-                    # Unified Audit Prompt with Social Sentiment Scan
-                    audit_prompt = (
-                        f"1. Search news for macro risks on {selected_ticker}.\n"
-                        f"2. Scan Reddit and X (Twitter) for retail sentiment on {selected_ticker}.\n"
-                        f"3. VETO if risk or extreme FOMO is detected. PROCEED if safe."
-                    )
-                    
-                    response = client.models.generate_content(
-                        model='gemini-3-flash-preview',
-                        contents=audit_prompt,
-                        config=types.GenerateContentConfig(
-                            system_instruction="You are a Cynical Risk Manager. Your goal is to kill bad trades.",
-                            tools=[types.Tool(google_search=types.GoogleSearch())]
-                        )
-                    )
-                    
-                    # Log grounding metadata
-                    metadata = getattr(response.candidates[0], "grounding_metadata", None)
-                    if metadata:
-                        with st.expander("📚 Research & Sentiment Sources"):
-                            for i, chunk in enumerate(metadata.grounding_chunks or []):
-                                if chunk.web: st.markdown(f"**[{i+1}]** {chunk.web.title} — [Read]({chunk.web.uri})")
-
-                    if "PROCEED" in response.text.upper():
-                        st.success("✅ AUDIT PASSED")
-                        st.write(response.text)
-                        msg = f"🎯 **ALPHA SIGNAL: {selected_ticker}**\nDir: {trade_dir}\nSentiment: {response.text[:100]}...\nAudit: PASSED ✅"
-                        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg})
-                        status.update(label="🚀 Signal Dispatched!", state="complete")
-                    else:
-                        st.error(f"❌ VETOED: {response.text}")
-                except Exception as e:
-                    st.error(f"AI Failure: {e}")
+if st.button("🚀 ACTIVATE AGENT COMMITTEE"):
+    with st.status("Gathering Committee...", expanded=True) as status:
+        client = genai.Client(api_key=GEMINI_KEY)
+        
+        # AGENT 1: THE BULL
+        bull_res = client.models.generate_content(
+            model='gemini-3-flash-preview',
+            contents=f"Search for BULLISH news on {target}. Why should we BUY this today?",
+            config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
+        )
+        st.chat_message("user", avatar="🐂").write(bull_res.text)
+        
+        # AGENT 2: THE BEAR
+        bear_res = client.models.generate_content(
+            model='gemini-3-flash-preview',
+            contents=f"Search for BEARISH news on {target}. Why is this a TRAP or a SHORT?",
+            config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
+        )
+        st.chat_message("user", avatar="🐻").write(bear_res.text)
+        
+        # AGENT 3: THE RISK MANAGER (Judge)
+        final_verdict = client.models.generate_content(
+            model='gemini-3-flash-preview',
+            contents=f"Review the Bull and Bear arguments for {target}. Decide: PROCEED or VETO.",
+            config=types.GenerateContentConfig(system_instruction="You are the Judge. Be cynical. If they disagree, side with caution.")
+        )
+        
+        if "PROCEED" in final_verdict.text.upper():
+            st.success("🏁 VERDICT: PROCEED")
+            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
+                          data={"chat_id": CHAT_ID, "text": f"✅ APPROVED: {target}\nPosition: {all_signals[all_signals.Ticker==target].Position.values[0]}"})
         else:
-            st.warning(f"Analyst: Confidence {prob_score}% < {threshold}%")
+            st.error(f"🚫 VERDICT: VETOED - {final_verdict.text[:200]}...")
