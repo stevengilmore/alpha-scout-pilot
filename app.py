@@ -102,7 +102,7 @@ if st.button("🚀 ACTIVATE AGENT SYSTEM", key="swarm_btn"):
                     
                     # 2. Call model with Search Tool
                     response = client.models.generate_content(
-                        model='gemini-2.0-flash', 
+                        model='gemini-3-flash-preview', 
                         contents=persona,
                         config=types.GenerateContentConfig(
                             tools=[types.Tool(google_search=types.GoogleSearch())],
