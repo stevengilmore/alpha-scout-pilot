@@ -110,6 +110,24 @@ if st.button("🚀 ACTIVATE AGENT SYSTEM", key="swarm_btn"):
                         )
                     )
 
+# 2. PASTE THE CITATION GENERATOR HERE
+metadata = getattr(response.candidates[0], "grounding_metadata", None)
+
+if metadata:
+    with st.expander("📚 Strategist's Research Sources"):
+        # Display the specific search queries Gemini used
+        if metadata.web_search_queries:
+            st.write(f"**Search Queries:** {', '.join(metadata.web_search_queries)}")
+            
+        # List clickable web sources (Title + URL)
+        if metadata.grounding_chunks:
+            st.markdown("---")
+            for i, chunk in enumerate(metadata.grounding_chunks):
+                if chunk.web:
+                    title = chunk.web.title
+                    uri = chunk.web.uri
+                    st.markdown(f"**[{i+1}]** {title} — [Read Article]({uri})")
+                    
                     ai_decision = response.text.upper()
 
                     if "PROCEED" in ai_decision:
