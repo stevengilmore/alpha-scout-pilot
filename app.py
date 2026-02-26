@@ -21,17 +21,20 @@ ticker = st.sidebar.selectbox("Select Asset", ["QQQ", "SPY", "BTC-USD", "NVDA", 
 capital = st.sidebar.number_input("Trading Capital (€)", value=2500)
 profit_target = 20 # Our €20 goal
 
+import pandas as pd
 @st.cache_data(ttl=60)
 def get_market_data(symbol):
-    df = yf.download(symbol, period="5d", interval="5m")
+    # We add 'auto_adjust=True' and 'multi_level_download=False' to keep it simple
+    df = yf.download(symbol, period="5d", interval="5m", auto_adjust=True, multi_level_download=False)
+    
+    # This line ensures we don't have a 'Multi-Index' headache
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+        
     # Professional Indicators
     df['EMA_200'] = ta.ema(df['Close'], length=200)
     df['RSI'] = ta.rsi(df['Close'], length=14)
-    df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
     return df
-
-data = get_market_data(ticker)
-curr = data.iloc[-1]
 
 # --- 3. PROBABILITY CALCULATION ---
 # Gate 1: Trend Filter (Are we above the 200 EMA?)
