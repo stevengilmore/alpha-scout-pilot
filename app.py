@@ -16,6 +16,23 @@ CHAT_ID = st.secrets["CHAT_ID"]
 genai.configure(api_key=GEMINI_KEY)
 # Try this if the first one doesn't work:
 model = genai.GenerativeModel('gemini-3.1-pro-preview')
+from google import genai # Use the new genai import
+from google.genai import types
+
+# Initialize the new Client
+client = genai.Client(api_key=st.secrets["GEMINI_KEY"])
+
+# Update the Strategist logic at the bottom of your file:
+if "PROCEED" in response.text.upper():
+    # Using the official Gemini 3.1 Pro Preview string
+    response = client.models.generate_content(
+        model="gemini-3.1-pro-preview",
+        contents=risk_prompt,
+        config=types.GenerateContentConfig(
+            # Optional: Set 'high' thinking for maximum protection of your 2.500€
+            thinking_config=types.ThinkingConfig(thinking_level="high")
+        )
+    )
 
 
 # --- 1. SETTINGS & STYLING ---
