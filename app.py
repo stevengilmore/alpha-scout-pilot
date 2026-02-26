@@ -15,7 +15,7 @@ CHAT_ID = st.secrets["CHAT_ID"]
 # 2. Configure the AI Brain
 genai.configure(api_key=GEMINI_KEY)
 # Try this if the first one doesn't work:
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-3-flash')
 
 # --- 1. SETTINGS & STYLING ---
 st.set_page_config(page_title="Alpha Scout Pro", page_icon="🛡️", layout="wide")
