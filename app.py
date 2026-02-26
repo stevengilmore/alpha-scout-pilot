@@ -207,29 +207,38 @@ with st.sidebar:
     st.subheader("🛠️ Developer Tools")
     test_mode = st.toggle("Enable Test Mode", help="Bypasses technical filters for demo purposes.")
 
-# --- 🤖 AGENT EXECUTION CENTER ---
+# --- 🤖 UNIFIED AGENT EXECUTION CENTER ---
 st.divider()
 st.header("🤖 Autonomous Agent Swarm")
 
-if st.button("🚀 ACTIVATE AGENT SYSTEM"):
+# We add a unique 'key' to prevent the DuplicateElementId error
+if st.button("🚀 ACTIVATE AGENT SYSTEM", key="main_agent_button"):
     with st.status("Agent Swarm Active...", expanded=True) as status:
         
-        # Determine if we proceed based on math OR the manual override
+        # Check if we should proceed (Math OR Manual Override)
         if prob_score >= 90 or test_mode:
             if test_mode:
-                st.info("⚠️ TEST MODE: Technical filters bypassed.")
+                st.info("🧪 TEST MODE: Technical analysis bypassed.")
             
             st.write("🧠 Strategist: Consulting Gemini 3 Risk Manager...")
             
             # Use the instructions you set in AI Studio
-            risk_prompt = f"Analyze recent news for {ticker}. VETO if high risk. PROCEED if safe."
+            risk_prompt = f"Analyze today's news for {ticker}. VETO if high risk. PROCEED if safe."
             response = model.generate_content(risk_prompt)
             
             if "PROCEED" in response.text.upper():
-                st.write("📡 Dispatcher: Risk cleared. Sending Telegram...")
-                # Dispatch alert...
+                st.write("🛡️ Risk Audit: PASSED")
+                st.write("📡 Dispatcher: Sending instruction to Telegram...")
+                
+                # Format the message for your phone
+                alert_text = f"🎯 SIGNAL CONFIRMED: {ticker}\nPrice: ${round(curr['Close'], 2)}\nCheck Trade Republic!"
+                requests.post(f"https://api.telegram.org/bot{st.secrets['TG_TOKEN']}/sendMessage", 
+                              data={"chat_id": st.secrets['CHAT_ID'], "text": alert_text})
+                
                 status.update(label="✅ SUCCESS: Signal Sent!", state="complete")
             else:
-                st.error(f"❌ AI VETO: {response.text}")
+                st.error(f"❌ VETOED BY AI: {response.text}")
+                status.update(label="⚠️ Strategist blocked the trade", state="error")
         else:
-            st.warning(f"⚖️ Analyst: Probability ({prob_score}%) too low.")
+            st.warning(f"⚖️ Analyst: Probability ({prob_score}%) too low for professional entry.")
+            status.update(label="😴 No Action Taken", state="complete")
