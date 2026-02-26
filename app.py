@@ -1,6 +1,6 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd  # <--- THIS IS THE MISSING LINE
+import pandas as pd     # <--- THIS IS THE FIX
 import pandas_ta as ta
 import requests
 import google.generativeai as genai
