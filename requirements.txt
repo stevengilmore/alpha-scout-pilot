@@ -3,3 +3,4 @@ yfinance
 pandas_ta
 requests
 google-generativeai
+google-genai>=1.51.0
