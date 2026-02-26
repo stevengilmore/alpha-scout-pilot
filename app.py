@@ -44,4 +44,70 @@ def get_market_pulse():
     return pd.DataFrame(pulse_data).sort_values(by="Change", key=abs, ascending=False)
 
 def get_technical_analysis(ticker):
-    df = yf.download(ticker, period="5d", interval="1h", progress=
+    df = yf.download(ticker, period="5d", interval="1h", progress=False)
+    if df.empty: return "NEUTRAL", 0, 0
+    
+    # Trend Analysis (200 EMA)
+    ema = ta.ema(df['Close'], length=200).iloc[-1]
+    rsi = ta.rsi(df['Close']).iloc[-1]
+    price = float(df['Close'].iloc[-1])
+    
+    direction = "LONG (🟢 Buy)" if price > ema else "SHORT (🔴 Sell)"
+    
+    # Calculate Confidence Score (75% Threshold)
+    score = 65 
+    if (direction.startswith("LONG") and rsi < 45) or (direction.startswith("SHORT") and rsi > 55):
+        score += 15
+    return direction, score, price
+
+# --- 4. DASHBOARD UI ---
+st.title("🛡️ Alpha Scout Pro: Global Command")
+
+# Volatility Pulse Sidebar
+with st.sidebar:
+    st.header("🔥 Volatility Pulse")
+    movers = get_market_pulse()
+    for _, row in movers.head(5).iterrows():
+        color = "green" if row['Change'] > 0 else "red"
+        st.markdown(f"**{row['Ticker']}**: :{color}[{round(row['Change'], 2)}%]")
+    
+    st.divider()
+    threshold = st.slider("Sensitivity Threshold %", 50, 95, 75)
+    test_mode = st.toggle("Enable AI Test Mode")
+
+# Main Selection
+selected_ticker = st.selectbox("Select Target Asset", list(ASSET_MAP.keys()))
+trade_dir, prob_score, current_price = get_technical_analysis(selected_ticker)
+
+col1, col2 = st.columns([2, 1])
+with col1:
+    st.subheader(f"📊 {ASSET_MAP[selected_ticker]} Analysis")
+    st.metric("Directional Bias", trade_dir, f"{prob_score}% Confidence")
+    # Placeholder for chart (re-use your previous chart code here)
+
+with col2:
+    st.subheader("🤖 Swarm Strategist")
+    if st.button("🚀 RUN AI AUDIT"):
+        if prob_score >= threshold or test_mode:
+            with st.status("Strategist Performing Audit...", expanded=True) as status:
+                try:
+                    client = genai.Client(api_key=GEMINI_KEY)
+                    persona = f"You are a cynical Risk Manager. Audit a {trade_dir} on {ASSET_MAP[selected_ticker]}. Search news for vetos. PROCEED or VETO."
+                    
+                    response = client.models.generate_content(
+                        model='gemini-3-flash-preview',
+                        contents=persona,
+                        config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
+                    )
+                    
+                    if "PROCEED" in response.text.upper():
+                        st.success("✅ AUDIT PASSED")
+                        msg = f"🎯 **ALPHA SIGNAL: {selected_ticker}**\nDir: {trade_dir}\nPrice: ${round(current_price, 2)}\nAudit: PASSED"
+                        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg})
+                        status.update(label="🚀 Signal Dispatched!", state="complete")
+                    else:
+                        st.error(f"❌ VETO: {response.text}")
+                except Exception as e:
+                    st.error(f"API Error: {e}")
+        else:
+            st.warning("Analyst: Confidence too low for audit.")
