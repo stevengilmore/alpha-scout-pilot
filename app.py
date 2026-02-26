@@ -3,8 +3,9 @@ import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 import requests
-import google.generativeai as genai
 from datetime import datetime
+from google import genai  # The NEW unified SDK
+from google.genai import types
 
 # --- 1. SETTINGS & SECRETS ---
 st.set_page_config(page_title="Alpha Scout Pro", page_icon="🛡️", layout="wide")
