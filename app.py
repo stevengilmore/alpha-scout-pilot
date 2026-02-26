@@ -6,21 +6,22 @@ import requests
 from google import genai
 from google.genai import types
 
-# --- 1. SETTINGS & SECRETS ---
+# --- 1. SETTINGS ---
 st.set_page_config(page_title="Alpha Scout Command", page_icon="🛰️", layout="wide")
-
 GEMINI_KEY = st.secrets.get("GEMINI_KEY")
 TG_TOKEN = st.secrets.get("TG_TOKEN")
 CHAT_ID = st.secrets.get("CHAT_ID")
 
+# Expanded Watchlist (Feb 2026 Focus)
 ASSET_MAP = {
-    "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "NVDA": "NVIDIA", "AAPL": "Apple",
-    "MSFT": "Microsoft", "TSLA": "Tesla", "AZN.L": "AstraZeneca", "SAP.DE": "SAP SE"
+    "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum", "SOL-USD": "Solana",
+    "NVDA": "NVIDIA", "AAPL": "Apple", "TSLA": "Tesla", "MSFT": "Microsoft",
+    "SAP.DE": "SAP SE", "AZN.L": "AstraZeneca"
 }
 
 # --- 2. THE SIGNAL ENGINE ---
-def get_signals():
-    signals = []
+def get_all_signals():
+    results = []
     for ticker, name in ASSET_MAP.items():
         try:
             df = yf.download(ticker, period="2y", interval="1d", progress=False)
@@ -32,77 +33,67 @@ def get_signals():
             curr = df.iloc[-1]
             
             # Position Logic
-            pos_type = "LONG 🟢" if curr['Close'] > curr['EMA_200'] else "SHORT 🔴"
+            pos = "LONG 🟢" if curr['Close'] > curr['EMA_200'] else "SHORT 🔴"
+            score = 70 + (20 if (pos == "LONG 🟢" and curr['RSI'] < 45) or (pos == "SHORT 🔴" and curr['RSI'] > 55) else 0)
             
-            # Score (Feb 26, 2026 Market Sensitivity)
-            score = 70
-            if pos_type == "LONG 🟢" and curr['RSI'] < 45: score += 20
-            if pos_type == "SHORT 🔴" and curr['RSI'] > 55: score += 20
-            
-            signals.append({
-                "Asset": name, "Ticker": ticker, "Price": round(curr['Close'], 2),
-                "Position": pos_type, "Score": score
-            })
+            results.append({"Asset": name, "Ticker": ticker, "Price": round(curr['Close'], 2), "Pos": pos, "Score": score})
         except: continue
-    return pd.DataFrame(signals).sort_values(by="Score", ascending=False)
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
 
-# --- 3. UI: TOP SUMMARY ---
-st.title("🛰️ Alpha Scout: Top Picks (Feb 26, 2026)")
-all_signals = get_signals()
+# --- 3. UI: THE 3x3 GRID ---
+st.title("🛰️ Alpha Scout: Strategic Opportunity Grid")
+signals_df = get_all_signals()
 
-# Highlight Top 3 "Buy Now"
-top_cols = st.columns(3)
-for i, row in enumerate(all_signals.head(3).to_dict('records')):
-    with top_cols[i]:
-        st.metric(f"{row['Asset']} ({row['Position']})", f"${row['Price']}", f"Confidence: {row['Score']}%")
-        if st.button(f"Analyze {row['Ticker']}", key=f"btn_{row['Ticker']}"):
-            st.session_state['selected_ticker'] = row['Ticker']
+# Create 3 rows of 3 columns for 9 choices
+for row_idx in range(0, 9, 3):
+    cols = st.columns(3)
+    for col_idx in range(3):
+        idx = row_idx + col_idx
+        if idx < len(signals_df):
+            data = signals_df.iloc[idx]
+            with cols[col_idx]:
+                st.info(f"**{data['Asset']}** ({data['Ticker']})")
+                st.metric(data['Pos'], f"${data['Price']}", f"Score: {data['Score']}%")
+                if st.button(f"🔍 Audit {data['Ticker']}", key=f"grid_{data['Ticker']}"):
+                    st.session_state['active_ticker'] = data['Ticker']
 
 st.divider()
 
-# --- 4. TELEGRAM DEBUGGER ---
+# --- 4. THE AGENT COMMITTEE ---
+active = st.session_state.get('active_ticker')
+if active:
+    st.subheader(f"🤖 Committee Debate: {ASSET_MAP[active]}")
+    if st.button("🔥 START DEBATE"):
+        with st.status("Agents Deliberating...", expanded=True) as status:
+            client = genai.Client(api_key=GEMINI_KEY)
+            
+            # 🐂 THE BULL (Optimization: One prompt to save time)
+            bull = client.models.generate_content(model='gemini-3-flash-preview',
+                contents=f"You are the BULL Agent. Search for news on {active}. Why is this a strong trade?",
+                config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]))
+            st.chat_message("user", avatar="🐂").write(bull.text)
+
+            # 🐻 THE BEAR
+            bear = client.models.generate_content(model='gemini-3-flash-preview',
+                contents=f"You are the BEAR Agent. Search for news on {active}. Why is this a dangerous trap?",
+                config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]))
+            st.chat_message("user", avatar="🐻").write(bear.text)
+
+            # 🛡️ THE RISK MANAGER (JUDGE)
+            judge = client.models.generate_content(model='gemini-3-flash-preview',
+                contents=f"Review the Bull and Bear for {active}. Decide: PROCEED or VETO. If you PROCEED, send a Telegram alert.",
+                config=types.GenerateContentConfig(system_instruction="You are the cynical Judge. Kill the trade unless both technicals and news are perfect."))
+            
+            if "PROCEED" in judge.text.upper():
+                st.success("✅ APPROVED")
+                requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
+                              data={"chat_id": CHAT_ID, "text": f"✅ {active} APPROVED BY COMMITTEE"})
+            else:
+                st.error(f"🚫 VETOED: {judge.text[:250]}...")
+
+# --- 5. TELEGRAM DEBUGGER ---
 with st.sidebar:
     st.header("🔧 Debugger")
-    if st.button("📱 Test Telegram Connection"):
-        test_url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        test_res = requests.post(test_url, data={"chat_id": CHAT_ID, "text": "🔔 SCOUT TEST: Connection Successful!"})
-        if test_res.status_code == 200: st.success("Message Sent! Check Phone.")
-        else: st.error(f"Error {test_res.status_code}: {test_res.text}")
-
-# --- 5. THE AGENT DEBATE (Bull vs. Bear) ---
-target = st.session_state.get('selected_ticker', "NVDA")
-st.subheader(f"🤖 Agentic Debate: {ASSET_MAP[target]}")
-
-if st.button("🚀 ACTIVATE AGENT COMMITTEE"):
-    with st.status("Gathering Committee...", expanded=True) as status:
-        client = genai.Client(api_key=GEMINI_KEY)
-        
-        # AGENT 1: THE BULL
-        bull_res = client.models.generate_content(
-            model='gemini-3-flash-preview',
-            contents=f"Search for BULLISH news on {target}. Why should we BUY this today?",
-            config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
-        )
-        st.chat_message("user", avatar="🐂").write(bull_res.text)
-        
-        # AGENT 2: THE BEAR
-        bear_res = client.models.generate_content(
-            model='gemini-3-flash-preview',
-            contents=f"Search for BEARISH news on {target}. Why is this a TRAP or a SHORT?",
-            config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
-        )
-        st.chat_message("user", avatar="🐻").write(bear_res.text)
-        
-        # AGENT 3: THE RISK MANAGER (Judge)
-        final_verdict = client.models.generate_content(
-            model='gemini-3-flash-preview',
-            contents=f"Review the Bull and Bear arguments for {target}. Decide: PROCEED or VETO.",
-            config=types.GenerateContentConfig(system_instruction="You are the Judge. Be cynical. If they disagree, side with caution.")
-        )
-        
-        if "PROCEED" in final_verdict.text.upper():
-            st.success("🏁 VERDICT: PROCEED")
-            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
-                          data={"chat_id": CHAT_ID, "text": f"✅ APPROVED: {target}\nPosition: {all_signals[all_signals.Ticker==target].Position.values[0]}"})
-        else:
-            st.error(f"🚫 VERDICT: VETOED - {final_verdict.text[:200]}...")
+    if st.button("📱 Force Telegram Test"):
+        res = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": "🔔 SCOUT: Connection OK!"})
+        st.write(f"Status: {res.status_code}")
