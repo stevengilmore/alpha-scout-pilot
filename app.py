@@ -162,3 +162,41 @@ if st.button("▶️ RUN FULL AGENTIC WORKFLOW"):
         else:
             st.warning("⚖️ Technical Probability too low (Needs 90%+)")
             status.update(label="😴 No Action Taken", state="complete")
+
+# --- 🤖 AGENT EXECUTION CENTER ---
+st.divider()
+st.header("🤖 Autonomous Agent Swarm")
+
+if st.button("🚀 ACTIVATE AGENT SYSTEM"):
+    # Connect to the API using the Secret Key you pasted
+    genai.configure(api_key=st.secrets["GEMINI_KEY"])
+    
+    # We use the model string that supports your Search tool
+    model = genai.GenerativeModel('gemini-1.5-flash') 
+
+    with st.status("Agent Swarm Active...", expanded=True) as status:
+        st.write("🔍 Analyst: Checking technical probability...")
+        
+        if prob_score >= 90:
+            st.write("🧠 Strategist: Consulting Gemini 3 Risk Manager...")
+            
+            # This is the EXACT persona from your Screenshot!
+            risk_manager_prompt = f"""
+            You are a cynical Senior Risk Manager. Our starting capital is 2.500 €. 
+            We only risk 1% (25 €) per trade. Search news for {ticker}. 
+            If there's high risk, say 'VETO'. If safe, say 'PROCEED'.
+            """
+            
+            # The API call that links your app to Google AI Studio
+            response = model.generate_content(risk_manager_prompt)
+            
+            if "PROCEED" in response.text.upper():
+                st.write("📡 Dispatcher: Risk cleared. Sending Telegram...")
+                # (Telegram Post Request Code Here)
+                status.update(label="✅ SUCCESS: Signal Sent!", state="complete")
+            else:
+                st.error(f"❌ AI VETO: {response.text}")
+                status.update(label="⚠️ Trade Blocked", state="error")
+        else:
+            st.warning(f"⚖️ Analyst: Probability ({prob_score}%) too low.")
+            status.update(label="😴 Monitoring...", state="complete")
