@@ -17,6 +17,12 @@ genai.configure(api_key=GEMINI_KEY)
 # Try this if the first one doesn't work:
 model = genai.GenerativeModel('gemini-2.5-flash')
 
+# Add this to your sidebar to find the correct model name
+if st.sidebar.button("📋 List Available Models"):
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            st.sidebar.write(m.name)
+
 # --- 1. SETTINGS & STYLING ---
 st.set_page_config(page_title="Alpha Scout Pro", page_icon="🛡️", layout="wide")
 
