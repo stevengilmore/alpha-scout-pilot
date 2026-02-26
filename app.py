@@ -62,7 +62,6 @@ with col1:
 with col2:
     st.subheader("💰 Risk Manager")
     stop_loss_dist = (curr['ATR'] * 2)
-    # Prevent division by zero
     if stop_loss_dist > 0:
         pos_size = min(capital, (risk_euro / (stop_loss_dist / price)))
     else:
@@ -82,12 +81,10 @@ if st.button("🚀 ACTIVATE AGENT SYSTEM", key="swarm_btn"):
     else:
         with st.status("Agent Swarm Active...", expanded=True) as status:
             
-            # GATE 1: ANALYST
             st.write("🔍 Analyst: Checking Market Confluence...")
             if prob_score >= 90 or test_mode:
                 if test_mode: st.info("🧪 Test Mode: Bypassing technical filters.")
                 
-                # GATE 2: STRATEGIST (Gemini 3.0 / 2.0 Unified)
                 st.write("🧠 Strategist: Performing News-Grounded Audit...")
                 
                 persona = f"""
@@ -97,10 +94,8 @@ if st.button("🚀 ACTIVATE AGENT SYSTEM", key="swarm_btn"):
                 """
 
                 try:
-                    # 1. Initialize modern client
+                    # 1. AI Analysis
                     client = genai.Client(api_key=GEMINI_KEY)
-                    
-                    # 2. Call model with Search Tool
                     response = client.models.generate_content(
                         model='gemini-3-flash-preview', 
                         contents=persona,
@@ -110,31 +105,23 @@ if st.button("🚀 ACTIVATE AGENT SYSTEM", key="swarm_btn"):
                         )
                     )
 
-# 2. PASTE THE CITATION GENERATOR HERE
-metadata = getattr(response.candidates[0], "grounding_metadata", None)
+                    # 2. Research Sources Box
+                    metadata = getattr(response.candidates[0], "grounding_metadata", None)
+                    if metadata:
+                        with st.expander("📚 Strategist's Research Sources"):
+                            if metadata.web_search_queries:
+                                st.write(f"**Queries:** {', '.join(metadata.web_search_queries)}")
+                            if metadata.grounding_chunks:
+                                for i, chunk in enumerate(metadata.grounding_chunks):
+                                    if chunk.web:
+                                        st.markdown(f"**[{i+1}]** {chunk.web.title} — [Link]({chunk.web.uri})")
 
-if metadata:
-    with st.expander("📚 Strategist's Research Sources"):
-        # Display the specific search queries Gemini used
-        if metadata.web_search_queries:
-            st.write(f"**Search Queries:** {', '.join(metadata.web_search_queries)}")
-            
-        # List clickable web sources (Title + URL)
-        if metadata.grounding_chunks:
-            st.markdown("---")
-            for i, chunk in enumerate(metadata.grounding_chunks):
-                if chunk.web:
-                    title = chunk.web.title
-                    uri = chunk.web.uri
-                    st.markdown(f"**[{i+1}]** {title} — [Read Article]({uri})")
-                    
+                    # 3. Decision & Dispatch
                     ai_decision = response.text.upper()
-
                     if "PROCEED" in ai_decision:
                         st.write("🛡️ Risk Audit: **PASSED**")
-                        
-                        # GATE 3: DISPATCHER (Telegram)
                         st.write("📡 Dispatcher: Sending Signal to Telegram...")
+                        
                         msg = (f"🎯 **ALPHA SCOUT SIGNAL: {ticker}**\n"
                                f"Entry: ${round(price, 2)}\n"
                                f"Size: {round(pos_size, 2)}€\n"
@@ -145,8 +132,8 @@ if metadata:
                                           data={"chat_id": CHAT_ID, "text": msg})
                             status.update(label="✅ SUCCESS: Signal Sent!", state="complete")
                         else:
-                            st.warning("Telegram credentials missing in Secrets.")
-                            status.update(label="⚠️ AI Passed, but Telegram failed", state="error")
+                            st.warning("Telegram settings missing.")
+                            status.update(label="⚠️ Telegram Failed", state="error")
                     else:
                         st.error(f"❌ VETOED BY AI: {response.text}")
                         status.update(label="⚠️ Strategist Blocked Trade", state="error")
