@@ -95,13 +95,42 @@ if st.button("🚀 ACTIVATE AGENT SYSTEM", key="swarm_btn"):
         if prob_score >= 90 or test_mode:
             if test_mode: st.info("🧪 Test Mode: Bypassing technical filters.")
             
-            # GATE 2: STRATEGIST (Gemini)
-            st.write("🧠 Strategist: Performing News-Grounded Audit...")
-            persona = f"""
-            You are a cynical Senior Risk Manager for a {capital}€ fund. 
-            Search news for {ticker}. If there is ANY major macro risk today, say 'VETO'. 
-            Otherwise say 'PROCEED'. Be brief.
-            """
+      # --- GATE 2: STRATEGIST (Gemini 2026 Unified SDK) ---
+st.write("🧠 Strategist: Performing News-Grounded Audit...")
+
+# The prompt for your risk audit
+persona = f"""
+You are a cynical Senior Risk Manager for a {capital}€ fund. 
+Our capital is {capital}€. We only risk 1% per trade.
+Search news for {ticker}. If there is ANY major macro risk today, respond ONLY with 'VETO' and a blunt reason.
+Otherwise, respond with 'PROCEED'.
+"""
+
+try:
+    # 1. Initialize the modern client (make sure this is inside the button logic)
+    client = genai.Client(api_key=st.secrets["GEMINI_KEY"])
+    
+    # 2. Call the model using the 2026 Tool syntax
+    response = client.models.generate_content(
+        model='gemini-2.0-flash', # Recommended for Search grounding
+        contents=persona,
+        config=types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=1.0 # Recommended setting for grounding
+        )
+    )
+
+    # 3. Handle the decision
+    if "PROCEED" in response.text.upper():
+        st.write("🛡️ Risk Audit: **PASSED**")
+        # --- (Your Dispatcher/Telegram code goes here) ---
+    else:
+        st.error(f"❌ VETOED BY AI: {response.text}")
+        status.update(label="⚠️ Strategist Blocked Trade", state="error")
+
+except Exception as e:
+    st.error(f"AI Error: {e}")
+    status.update(label="❌ API Failure", state="error")
             
             try:
                 # Use the Search Tool
