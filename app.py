@@ -1,9 +1,20 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd     # <--- THIS IS THE FIX
+import pandas as pd     
 import pandas_ta as ta
 import requests
 import google.generativeai as genai
+import time
+from datetime import datetime
+
+# 1. Access the Secrets you just pasted
+GEMINI_KEY = st.secrets["GEMINI_KEY"]
+TG_TOKEN = st.secrets["TG_TOKEN"]
+CHAT_ID = st.secrets["CHAT_ID"]
+
+# 2. Configure the AI Brain
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- 1. SETTINGS & STYLING ---
 st.set_page_config(page_title="Alpha Scout Pro", page_icon="🛡️", layout="wide")
@@ -118,3 +129,36 @@ if prob_score >= 90:
             st.error("Missing Telegram Token or Chat ID!")
 else:
     st.write("🔎 Agent is scanning for probability confluence (EMA 200 + RSI)...")
+
+st.divider()
+st.subheader("🚀 Agent Execution Center")
+
+if st.button("▶️ RUN FULL AGENTIC WORKFLOW"):
+    with st.status("Agent Swarm Active...", expanded=True) as status:
+        # Step A: Technical Check
+        st.write(f"🔍 Analyzing {ticker}...")
+        if prob_score >= 90:
+            st.write("✅ Technical Signal: HIGH PROBABILITY")
+            
+            # Step B: AI Risk Audit
+            st.write("🤖 Strategist: Running Gemini 1.5 News Audit...")
+            # We pass the persona/instructions here
+            prompt = f"Analyze recent news for {ticker}. If there is any major risk today, say 'VETO'. Otherwise say 'PROCEED'."
+            response = model.generate_content(prompt)
+            
+            if "PROCEED" in response.text.upper():
+                st.write("🛡️ Risk Audit: PASSED")
+                
+                # Step C: Dispatch to Telegram
+                st.write("📡 Dispatcher: Sending instruction to phone...")
+                msg = f"🎯 SIGNAL CONFIRMED: {ticker}\nEntry: ${round(curr['Close'], 2)}\nCheck Trade Republic!"
+                requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
+                              data={"chat_id": CHAT_ID, "text": msg})
+                
+                status.update(label="🚀 SUCCESS: Signal Dispatched to Telegram!", state="complete")
+            else:
+                st.error(f"❌ VETOED BY AI: {response.text}")
+                status.update(label="⚠️ Trade Blocked by Risk Manager", state="error")
+        else:
+            st.warning("⚖️ Technical Probability too low (Needs 90%+)")
+            status.update(label="😴 No Action Taken", state="complete")
