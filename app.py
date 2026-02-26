@@ -15,7 +15,7 @@ CHAT_ID = st.secrets["CHAT_ID"]
 # 2. Configure the AI Brain
 genai.configure(api_key=GEMINI_KEY)
 # Try this if the first one doesn't work:
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-3-flash-preview')
 
 # Add this to your sidebar to find the correct model name
 if st.sidebar.button("📋 List Available Models"):
