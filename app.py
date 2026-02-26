@@ -209,10 +209,10 @@ with st.sidebar:
 
 # --- 🤖 UNIFIED AGENT EXECUTION CENTER ---
 st.divider()
-st.header("🤖 Autonomous Agent Swarm")
+st.header("🤖 TEST Autonomous Agent Swarm")
 
 # We add a unique 'key' to prevent the DuplicateElementId error
-if st.button("🚀 ACTIVATE AGENT SYSTEM", key="main_agent_button"):
+if st.button("🚀 TEST ACTIVATE AGENT SYSTEM", key="main_agent_button"):
     with st.status("Agent Swarm Active...", expanded=True) as status:
         
         # Check if we should proceed (Math OR Manual Override)
