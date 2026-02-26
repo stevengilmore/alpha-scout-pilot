@@ -3,166 +3,115 @@ import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
 import requests
-from datetime import datetime
-from google import genai  # The NEW unified SDK
+from google import genai
 from google.genai import types
 
 # --- 1. SETTINGS & SECRETS ---
 st.set_page_config(page_title="Alpha Scout Pro", page_icon="🛡️", layout="wide")
-
 GEMINI_KEY = st.secrets.get("GEMINI_KEY")
 TG_TOKEN = st.secrets.get("TG_TOKEN")
 CHAT_ID = st.secrets.get("CHAT_ID")
 
-# --- 2. SIDEBAR CONTROLS ---
+# --- 2. ASSET MAPPING (Full Names) ---
+ASSET_MAP = {
+    "QQQ": "Invesco QQQ Trust (Nasdaq 100)",
+    "SPY": "SPDR S&P 500 ETF Trust",
+    "BTC-USD": "Bitcoin (USD)",
+    "NVDA": "NVIDIA Corporation",
+    "AAPL": "Apple Inc.",
+    "TSLA": "Tesla, Inc."
+}
+
 with st.sidebar:
     st.title("🛡️ Control Panel")
-    ticker = st.selectbox("Select Primary Asset", ["QQQ", "SPY", "BTC-USD", "NVDA", "AAPL", "TSLA"])
+    ticker = st.selectbox("Select Asset", list(ASSET_MAP.keys()))
+    asset_full_name = ASSET_MAP[ticker]
     capital = 2500  
-    risk_euro = 25  
-    
-    st.divider()
-    st.subheader("🛠️ Developer Tools")
-    test_mode = st.toggle("Enable Test Mode", help="Bypasses technical filters for demo.")
+    # LOWERED THRESHOLD: 70% allows more opportunities
+    threshold = st.slider("Success Probability Threshold", 50, 90, 75)
+    test_mode = st.toggle("Enable Test Mode")
 
-# --- 3. DATA ENGINE ---
+# --- 3. DATA & DIRECTION ENGINE ---
 @st.cache_data(ttl=60)
 def get_market_data(symbol):
-    try:
-        df = yf.download(symbol, period="5d", interval="5m", auto_adjust=True)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df['EMA_200'] = ta.ema(df['Close'], length=200)
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-        return df
-    except Exception as e:
-        st.error(f"Error fetching {symbol}: {e}")
-        return pd.DataFrame()
+    df = yf.download(symbol, period="5d", interval="5m", auto_adjust=True)
+    if df.empty: return df
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    df['EMA_200'] = ta.ema(df['Close'], length=200)
+    df['RSI'] = ta.rsi(df['Close'], length=14)
+    df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+    return df
 
-# --- 4. SCANNER LOGIC ---
-def calculate_score(df):
-    if df.empty: return 0
+def get_signal_direction(df):
     curr = df.iloc[-1]
-    price = float(curr['Close'])
-    ema = float(curr['EMA_200'])
-    rsi = float(curr['RSI'])
+    # LONG if price > EMA (Bullish), SHORT if price < EMA (Bearish)
+    direction = "LONG (🟢 Buy)" if curr['Close'] > curr['EMA_200'] else "SHORT (🔴 Sell)"
     
-    score = 0
-    if price > ema: score += 60
-    if rsi < 45: score += 30
-    return score
+    # Calculate score based on trend and RSI momentum
+    score = 60 # Base for trend alignment
+    if direction == "LONG (🟢 Buy)" and curr['RSI'] < 45: score += 20
+    if direction == "SHORT (🔴 Sell)" and curr['RSI'] > 55: score += 20
+    return direction, score
 
-# --- 5. DASHBOARD UI ---
-st.title(f"🛡️ Alpha Scout Pro")
-
-# --- PROACTIVE SCANNER SECTION ---
-st.header("🛰️ Proactive Watchlist Scanner")
-watchlist = ["AAPL", "NVDA", "TSLA", "BTC-USD", "SPY", "QQQ"]
-
-if st.button("🔍 Scan All Assets Now"):
-    with st.status("Scanning markets...", expanded=False) as status:
-        found_hits = []
-        for symbol in watchlist:
-            df_scan = get_market_data(symbol)
-            score = calculate_score(df_scan)
-            if score >= 90:
-                found_hits.append(symbol)
-                st.write(f"🎯 **{symbol}** matches criteria ({score}%)")
-        
-        if not found_hits:
-            status.update(label="😴 No high-probability setups found.", state="complete")
-        else:
-            status.update(label=f"🎯 Found {len(found_hits)} opportunities!", state="complete")
-            st.session_state['active_hits'] = found_hits
-
-if 'active_hits' in st.session_state and st.session_state['active_hits']:
-    st.success(f"Top Picks: {', '.join(st.session_state['active_hits'])}")
-
-st.divider()
-
-# --- MAIN ANALYSIS SECTION ---
+# --- 4. DASHBOARD ---
 data = get_market_data(ticker)
 if not data.empty:
     curr = data.iloc[-1]
-    prob_score = calculate_score(data)
+    trade_dir, prob_score = get_signal_direction(data)
     
+    st.title(f"🛡️ {asset_full_name} ({ticker})")
     col1, col2 = st.columns([2, 1])
+    
     with col1:
-        st.subheader(f"📊 {ticker} Live Chart")
         st.line_chart(data[['Close', 'EMA_200']])
         m1, m2, m3 = st.columns(3)
-        m1.metric("Price", f"${round(curr['Close'], 2)}")
-        m2.metric("RSI", round(curr['RSI'], 1))
-        m3.metric("Probability", f"{prob_score}%")
+        m1.metric("Current Price", f"${round(curr['Close'], 2)}")
+        m2.metric("Direction", trade_dir)
+        m3.metric("AI Confidence", f"{prob_score}%")
 
     with col2:
         st.subheader("💰 Risk Manager")
-        atr = float(curr['ATR'])
-        stop_loss_dist = (atr * 2)
-        pos_size = min(capital, (risk_euro / (stop_loss_dist / float(curr['Close'])))) if stop_loss_dist > 0 else 0
-        
-        st.write(f"Bankroll: **{capital} €**")
-        st.write(f"Risk per Trade: **{risk_euro} €**")
+        pos_size = min(capital, (25 / ((curr['ATR']*2) / curr['Close']))) if curr['ATR'] > 0 else 0
+        st.write(f"Direction: **{trade_dir}**")
         st.success(f"Suggested Entry: **{round(pos_size, 2)} €**")
 
-# --- 6. THE AGENT SWARM (STRATEGIST & DISPATCHER) ---
-st.header("🤖 Autonomous Agent Swarm")
-
+# --- 5. THE AGENT SWARM ---
+st.divider()
 if st.button("🚀 ACTIVATE AGENT SYSTEM", key="swarm_btn"):
-    if not GEMINI_KEY:
-        st.error("Missing GEMINI_KEY in Secrets.")
-    else:
-        with st.status("Agent Swarm Active...", expanded=True) as status:
-            st.write("🔍 Analyst: Checking Market Confluence...")
+    with st.status("Agent Swarm Active...", expanded=True) as status:
+        if prob_score >= threshold or test_mode:
+            st.write(f"🧠 Strategist: Auditing **{trade_dir}** on {asset_full_name}...")
             
-            if prob_score >= 90 or test_mode:
-                if test_mode: st.info("🧪 Test Mode: Bypassing technical filters.")
-                
-                st.write("🧠 Strategist: Performing News-Grounded Audit...")
-                persona = f"You are a cynical Senior Risk Manager for a {capital}€ fund. Search news for {ticker}. VETO if risk exists, else PROCEED."
+            persona = f"""
+            You are a Senior Risk Manager. We are looking at a {trade_dir} trade for {asset_full_name}.
+            Search news for any events that would crash this specific asset today.
+            VETO if risky, PROCEED if safe.
+            """
+            
+            try:
+                client = genai.Client(api_key=GEMINI_KEY)
+                response = client.models.generate_content(
+                    model='gemini-3-flash-preview', 
+                    contents=persona,
+                    config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
+                )
 
-                try:
-                    client = genai.Client(api_key=GEMINI_KEY)
-                    response = client.models.generate_content(
-                        model='gemini-3-flash-preview', 
-                        contents=persona,
-                        config=types.GenerateContentConfig(
-                            tools=[types.Tool(google_search=types.GoogleSearch())],
-                            temperature=1.0
-                        )
-                    )
-
-                    # Research Sources
-                    metadata = getattr(response.candidates[0], "grounding_metadata", None)
-                    if metadata:
-                        with st.expander("📚 Strategist's Research Sources"):
-                            for i, chunk in enumerate(metadata.grounding_chunks or []):
-                                if chunk.web:
-                                    st.markdown(f"**[{i+1}]** {chunk.web.title} — [Link]({chunk.web.uri})")
-
-                    if "PROCEED" in response.text.upper():
-                        st.write("🛡️ Risk Audit: **PASSED**")
-                        
-                        # GATE 3: DISPATCHER (Robust Telegram)
-                        st.write("📡 Dispatcher: Sending Signal to Telegram...")
-                        msg = f"🎯 **ALPHA SCOUT: {ticker}**\nPrice: ${round(curr['Close'], 2)}\nSize: {round(pos_size, 2)}€\nAI Audit: PASSED ✅"
-                        
-                        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-                        t_res = requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-                        
-                        if t_res.status_code == 200:
-                            st.balloons()
-                            status.update(label="✅ SUCCESS: Signal Sent!", state="complete")
-                        else:
-                            st.error(f"Telegram Error {t_res.status_code}: {t_res.text}")
-                    else:
-                        st.error(f"❌ VETOED BY AI: {response.text}")
-                        status.update(label="⚠️ Strategist Blocked Trade", state="error")
-
-                except Exception as e:
-                    st.error(f"AI Error: {e}")
-                    status.update(label="❌ API Failure", state="error")
-            else:
-                st.warning(f"⚖️ Analyst: Probability ({prob_score}%) too low.")
-                status.update(label="😴 Monitoring...", state="complete")
+                if "PROCEED" in response.text.upper():
+                    st.write("✅ Risk Audit: **PASSED**")
+                    msg = (f"🎯 **ALPHA SCOUT SIGNAL**\n"
+                           f"Asset: {asset_full_name} ({ticker})\n"
+                           f"Direction: {trade_dir}\n"
+                           f"Entry: ${round(curr['Close'], 2)}\n"
+                           f"Size: {round(pos_size, 2)}€")
+                    
+                    requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
+                                  data={"chat_id": CHAT_ID, "text": msg})
+                    status.update(label="🚀 SIGNAL SENT!", state="complete")
+                    st.balloons()
+                else:
+                    st.error(f"❌ AI VETO: {response.text}")
+                    status.update(label="⚠️ Vetoed", state="error")
+            except Exception as e:
+                st.error(f"AI Error: {e}")
+        else:
+            st.warning(f"⚖️ Analyst: Confidence ({prob_score}%) below {threshold}% threshold.")
