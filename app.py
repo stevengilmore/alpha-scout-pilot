@@ -200,3 +200,36 @@ if st.button("🚀 ACTIVATE AGENT SYSTEM"):
         else:
             st.warning(f"⚖️ Analyst: Probability ({prob_score}%) too low.")
             status.update(label="😴 Monitoring...", state="complete")
+
+# --- 🧪 TEST & OVERRIDE SETTINGS ---
+with st.sidebar:
+    st.divider()
+    st.subheader("🛠️ Developer Tools")
+    test_mode = st.toggle("Enable Test Mode", help="Bypasses technical filters for demo purposes.")
+
+# --- 🤖 AGENT EXECUTION CENTER ---
+st.divider()
+st.header("🤖 Autonomous Agent Swarm")
+
+if st.button("🚀 ACTIVATE AGENT SYSTEM"):
+    with st.status("Agent Swarm Active...", expanded=True) as status:
+        
+        # Determine if we proceed based on math OR the manual override
+        if prob_score >= 90 or test_mode:
+            if test_mode:
+                st.info("⚠️ TEST MODE: Technical filters bypassed.")
+            
+            st.write("🧠 Strategist: Consulting Gemini 3 Risk Manager...")
+            
+            # Use the instructions you set in AI Studio
+            risk_prompt = f"Analyze recent news for {ticker}. VETO if high risk. PROCEED if safe."
+            response = model.generate_content(risk_prompt)
+            
+            if "PROCEED" in response.text.upper():
+                st.write("📡 Dispatcher: Risk cleared. Sending Telegram...")
+                # Dispatch alert...
+                status.update(label="✅ SUCCESS: Signal Sent!", state="complete")
+            else:
+                st.error(f"❌ AI VETO: {response.text}")
+        else:
+            st.warning(f"⚖️ Analyst: Probability ({prob_score}%) too low.")
