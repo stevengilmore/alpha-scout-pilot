@@ -13,24 +13,23 @@ from datetime import datetime
 session = requests.Session()
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
 
-# Updated Model Logic: Try 2.0 Stable, Fallback to 1.5
-PRIMARY_MODEL = "gemini-2.0-flash-001"
-FALLBACK_MODEL = "gemini-1.5-flash"
+# Multi-stage Fallback: Trying every known variation of the Flash model
+MODELS_TO_TRY = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
 
 GEMINI_KEY = os.environ.get("GEMINI_KEY") or st.secrets.get("GEMINI_KEY")
 client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
 AGENT_ROLES = {
-    "🐂 Opportunistic Scout": "Analyze catalysts & upside. Explain logic. End with VOTE: BUY/NO.",
-    "📈 Growth Specialist": "Analyze revenue & momentum. Explain logic. End with VOTE: BUY/NO.",
-    "🐻 Risk Auditor": "Identify red flags (debt, volatility). List rejection reasons. End with VOTE: BUY/NO."
+    "🐂 Opportunistic Scout": "Analyze catalysts & upside. End with VOTE: BUY/NO.",
+    "📈 Growth Specialist": "Analyze revenue & momentum. End with VOTE: BUY/NO.",
+    "🐻 Risk Auditor": "Identify red flags (debt, volatility). End with VOTE: BUY/NO."
 }
 
 # --- 2. DATA ENGINES ---
 @st.cache_data(ttl=86400)
 def get_tickers(index_name):
     if index_name == "Top Crypto":
-        return ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD", "AVAX-USD", "DOGE-USD", "LINK-USD"]
+        return ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD", "AVAX-USD"]
     urls = {
         "S&P 500": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
         "Nasdaq-100": "https://en.wikipedia.org/wiki/Nasdaq-100",
@@ -55,12 +54,12 @@ def get_intel(tickers, is_crypto=False):
             target = info.get('targetMeanPrice', curr * 1.15 if is_crypto else 0)
             if curr:
                 upside = ((target - curr) / curr * 100) if target else 0
-                favor_rank = 3 if upside > 15 and score < 2.2 else 2 if upside > 5 else 1
-                favor_text = "HIGH 🔥" if favor_rank == 3 else "MED ⚖️" if favor_rank == 2 else "LOW"
+                rank = 3 if upside > 15 and score < 2.2 else 2 if upside > 5 else 1
                 data.append({
                     "Ticker": t, "Company": info.get('shortName') or info.get('longName', t),
                     "Price": curr, "Upside %": round(upside, 1),
-                    "Score": score, "AI Favor": favor_text, "rank": favor_rank
+                    "Score": score, "AI Favor": "HIGH 🔥" if rank == 3 else "MED ⚖️" if rank == 2 else "LOW",
+                    "rank": rank
                 })
         except: continue
     if not data: return pd.DataFrame()
@@ -69,15 +68,16 @@ def get_intel(tickers, is_crypto=False):
 # --- 3. UI LAYOUT ---
 st.set_page_config(page_title="Alpha Scout Pro", layout="wide")
 
+# Sentiment
 try:
-    fng_res = session.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata", headers=HEADERS, timeout=5).json()
-    val, text = int(fng_res['fear_and_greed']['score']), fng_res['fear_and_greed']['rating'].upper()
+    fng = session.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata", headers=HEADERS).json()['fear_and_greed']
+    val, text = int(fng['score']), fng['rating'].upper()
 except: val, text = 50, "NEUTRAL"
 
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("🛰️ Alpha Scout: Global Command")
-    st.caption(f"Sync Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    st.caption(f"Sync: {datetime.now().strftime('%H:%M')} | Models: {MODELS_TO_TRY[0]}")
 with c2:
     st.metric(f"SENTIMENT: {text}", f"{val}/100")
     st.progress(val / 100)
@@ -85,12 +85,12 @@ with c2:
 st.divider()
 
 # --- 4. GLOBAL GRID ---
-row1_col1, row1_col2 = st.columns(2)
-row2_col1, row2_col2 = st.columns(2)
-indices = [("S&P 500", row1_col1), ("Nasdaq-100", row1_col2), ("DAX", row2_col1), ("Top Crypto", row2_col2)]
+row1 = st.columns(2)
+row2 = st.columns(2)
+indices = [("S&P 500", row1[0]), ("Nasdaq-100", row1[1]), ("DAX", row2[0]), ("Top Crypto", row2[1])]
 all_top_tickers = []
 
-with st.spinner("Aggregating Conviction Data..."):
+with st.spinner("Syncing markets..."):
     for idx_name, col in indices:
         with col:
             st.subheader(f"🏛️ {idx_name}")
@@ -102,7 +102,7 @@ with st.spinner("Aggregating Conviction Data..."):
 
 st.divider()
 
-# --- 5. ROBUST AI TOP PICK (FAILOVER ENABLED) ---
+# --- 5. AI TOP PICK (FAILOVER) ---
 st.subheader("🌟 AI Top Pick for Today")
 high_favor = [t for t in all_top_tickers if "HIGH" in str(t['AI Favor'])]
 top_list = high_favor if high_favor else all_top_tickers
@@ -111,56 +111,60 @@ if top_list and client:
     top_one = max(top_list, key=lambda x: x['Upside %'])
     
     @st.cache_data(ttl=3600)
-    def get_robust_reason(ticker, name):
-        # Try primary, then fallback
-        for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
+    def get_reason(ticker, name):
+        for m in MODELS_TO_TRY:
             try:
-                res = client.models.generate_content(model=model, contents=f"Why is {name} ({ticker}) a top pick? 1 sentence.")
-                return res.text.strip()
+                res = client.models.generate_content(model=m, contents=f"Why is {name} ({ticker}) the best pick? 1 sentence.")
+                return f"({m}) — {res.text.strip()}"
             except: continue
-        return "Strong institutional momentum and sector-leading price targets."
+        return "Strong consensus based on institutional technical analysis."
     
-    st.success(f"**{top_one['Company']} ({top_one['Ticker']})** — {get_robust_reason(top_one['Ticker'], top_one['Company'])}")
+    st.success(f"**{top_one['Company']} ({top_one['Ticker']})** — {get_reason(top_one['Ticker'], top_one['Company'])}")
 
 st.divider()
 
-# --- 6. RAPID SIMULTANEOUS AUDIT ---
+# --- 6. RAPID PARALLEL AUDIT ---
 st.subheader("🤖 AI Committee Deep-Dive")
 if all_top_tickers:
     ticker_map = {f"{r['Ticker']} - {r['Company']}": r for r in all_top_tickers}
-    sel_label = st.selectbox("Select asset to audit:", options=list(ticker_map.keys()))
+    sel_label = st.selectbox("Asset to audit:", options=list(ticker_map.keys()))
     sel_data = ticker_map[sel_label]
 
-    if st.button("🚀 RUN RAPID AUDIT"):
+    if st.button("🚀 RUN AUDIT"):
         with st.status("Council is debating...") as status:
-            def robust_agent_call(name, role):
-                for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
+            def agent_call(name, role):
+                last_err = ""
+                for m in MODELS_TO_TRY:
                     try:
                         res = client.models.generate_content(
-                            model=model, 
-                            contents=f"Audit {sel_data['Company']} ({sel_data['Ticker']}). Price: {sel_data['Price']}. Context: {yf.Ticker(sel_data['Ticker']).info}",
+                            model=m, 
+                            contents=f"Audit {sel_data['Company']} ({sel_data['Ticker']}). Price: {sel_data['Price']}. Data: {yf.Ticker(sel_data['Ticker']).info}",
                             config=types.GenerateContentConfig(system_instruction=role)
                         )
-                        return name, res.text
-                    except: continue
-                return name, "Critical failure: AI Models unavailable."
+                        return name, res.text, m
+                    except Exception as e:
+                        last_err = str(e)
+                        continue
+                return name, f"CRITICAL FAILURE. Last Error: {last_err}", "NONE"
 
-            outputs = {}
+            outputs = []
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                futures = {executor.submit(robust_agent_call, n, r): n for n, r in AGENT_ROLES.items()}
+                futures = [executor.submit(agent_call, n, r) for n, r in AGENT_ROLES.items()]
                 for f in concurrent.futures.as_completed(futures):
-                    n, text = f.result()
-                    outputs[n] = text
+                    outputs.append(f.result())
             
             cols = st.columns(3)
-            votes = sum(1 for t in outputs.values() if "VOTE: BUY" in t.upper())
-            for i, (n, text) in enumerate(outputs.items()):
+            votes = 0
+            for i, (n, text, model_used) in enumerate(outputs):
                 with cols[i]:
+                    is_buy = "VOTE: BUY" in text.upper()
+                    if is_buy: votes += 1
                     st.write(f"### {n}")
-                    st.write("✅ **BUY**" if "VOTE: BUY" in text.upper() else "❌ **REJECT**")
+                    st.write("✅ **BUY**" if is_buy else "❌ **REJECT**")
+                    st.caption(f"Model: {model_used}")
                     with st.expander("Reasoning"): st.markdown(text.replace("VOTE: BUY", "").replace("VOTE: NO", ""))
             
             if votes >= 2:
-                st.success(f"🏆 PASSED ({votes}/3)")
+                st.success(f"🏆 PASSED ({votes}/3)"); 
                 if votes == 3: confetti()
             else: st.error(f"🛑 REJECTED ({votes}/3)")
