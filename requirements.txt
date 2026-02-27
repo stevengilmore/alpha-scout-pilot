@@ -2,3 +2,5 @@ streamlit
 yfinance
 requests
 google-genai
+pandas
+fear-and-greed
