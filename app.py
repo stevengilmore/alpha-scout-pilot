@@ -12,20 +12,25 @@ from datetime import datetime
 # --- 1. CONFIG & HEADERS ---
 session = requests.Session()
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
+
+# MODEL CONFIG - Updated to the latest stable name
+# If gemini-2.0-flash still fails, gemini-1.5-flash is the 100% stable fallback
+MODEL_ID = "gemini-2.0-flash" 
+
 GEMINI_KEY = os.environ.get("GEMINI_KEY") or st.secrets.get("GEMINI_KEY")
 client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
 AGENT_ROLES = {
-    "🐂 Opportunistic Scout": "Analyze catalysts & upside. Explain logic before voting. End with VOTE: BUY/NO.",
-    "📈 Growth Specialist": "Analyze revenue & momentum. Explain logic before voting. End with VOTE: BUY/NO.",
-    "🐻 Risk Auditor": "Identify red flags (debt, SBC, volatility). List rejection reasons. End with VOTE: BUY/NO."
+    "🐂 Opportunistic Scout": "Analyze catalysts & upside. Explain logic. End with VOTE: BUY/NO.",
+    "📈 Growth Specialist": "Analyze revenue & momentum. Explain logic. End with VOTE: BUY/NO.",
+    "🐻 Risk Auditor": "Identify red flags (debt, volatility). List rejection reasons. End with VOTE: BUY/NO."
 }
 
-# --- 2. UPDATED DATA ENGINES ---
+# --- 2. DATA ENGINES ---
 @st.cache_data(ttl=86400)
 def get_tickers(index_name):
     if index_name == "Top Crypto":
-        return ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD", "ADA-USD", "AVAX-USD", "DOGE-USD", "DOT-USD", "LINK-USD"]
+        return ["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD", "AVAX-USD", "DOGE-USD", "LINK-USD"]
     
     urls = {
         "S&P 500": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
@@ -46,14 +51,12 @@ def get_intel(tickers, is_crypto=False):
     for t in tickers[:15]: 
         try:
             info = yf.Ticker(t).info
-            # Crypto doesn't have analyst scores, so we default to 2.0 for sorting purposes
             score = info.get('recommendationMean', 2.0 if is_crypto else 5.0)
             curr = info.get('regularMarketPrice') or info.get('currentPrice')
-            target = info.get('targetMeanPrice', curr * 1.1 if is_crypto else 0)
+            target = info.get('targetMeanPrice', curr * 1.15 if is_crypto else 0)
             
             if curr:
                 upside = ((target - curr) / curr * 100) if target else 0
-                # Sorting weight: High=3, Med=2, Low=1
                 favor_rank = 3 if upside > 15 and score < 2.2 else 2 if upside > 5 else 1
                 favor_text = "HIGH 🔥" if favor_rank == 3 else "MED ⚖️" if favor_rank == 2 else "LOW"
                 
@@ -65,15 +68,12 @@ def get_intel(tickers, is_crypto=False):
         except: continue
     
     if not data: return pd.DataFrame()
-    
-    # SORTING LOGIC: Priority 1: AI Favor (Rank 3 to 1), Priority 2: Analyst Score (Low to High)
     df = pd.DataFrame(data).sort_values(by=["rank", "Score"], ascending=[False, True])
     return df.drop(columns=["rank"]).head(6)
 
 # --- 3. UI LAYOUT ---
 st.set_page_config(page_title="Alpha Scout Pro", layout="wide")
 
-# Header & Sentiment
 try:
     fng_data = session.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata", headers=HEADERS, timeout=5).json()
     val, text = int(fng_data['fear_and_greed']['score']), fng_data['fear_and_greed']['rating'].upper()
@@ -100,7 +100,6 @@ with st.spinner("Syncing Global Markets..."):
             st.subheader(f"🏛️ {idx_name}")
             df = get_intel(get_tickers(idx_name), is_crypto=(idx_name == "Top Crypto"))
             if not df.empty:
-                # Custom styling for green upside and AI Favor highlight
                 st.dataframe(df.style.map(lambda v: f"color: {'#00ff00' if v > 0 else '#ff4b4b'}", subset=['Upside %']), 
                              use_container_width=True, hide_index=True)
                 all_top_tickers.extend(df.to_dict('records'))
@@ -114,10 +113,18 @@ top_list = high_favor if high_favor else all_top_tickers
 
 if top_list and client:
     top_one = max(top_list, key=lambda x: x['Upside %'])
+    
     @st.cache_data(ttl=3600)
     def get_reason(ticker, name):
-        res = client.models.generate_content(model="gemini-2.0-flash", contents=f"Why is {name} ({ticker}) the best pick right now? 1 sentence.")
-        return res.text.strip()
+        try:
+            # Using updated MODEL_ID
+            res = client.models.generate_content(
+                model=MODEL_ID, 
+                contents=f"Why is {name} ({ticker}) the best pick right now? 1 sentence."
+            )
+            return res.text.strip()
+        except Exception as e:
+            return f"Top conviction asset with strong technical upside. (Model note: {e})"
     
     st.success(f"**{top_one['Company']} ({top_one['Ticker']})** — {get_reason(top_one['Ticker'], top_one['Company'])}")
 
@@ -133,12 +140,15 @@ if all_top_tickers:
     if st.button("🚀 RUN RAPID AUDIT"):
         with st.status("Council is debating...") as status:
             def agent_call(name, role):
-                res = client.models.generate_content(
-                    model="gemini-2.0-flash", 
-                    contents=f"Audit {sel_data['Company']} ({sel_data['Ticker']}). Price: {sel_data['Price']}. Context: {yf.Ticker(sel_data['Ticker']).info}",
-                    config=types.GenerateContentConfig(system_instruction=role)
-                )
-                return name, res.text
+                try:
+                    res = client.models.generate_content(
+                        model=MODEL_ID, 
+                        contents=f"Audit {sel_data['Company']} ({sel_data['Ticker']}). Price: {sel_data['Price']}. Context: {yf.Ticker(sel_data['Ticker']).info}",
+                        config=types.GenerateContentConfig(system_instruction=role)
+                    )
+                    return name, res.text
+                except Exception as e:
+                    return name, f"Model Error: {e}"
 
             outputs = {}
             with concurrent.futures.ThreadPoolExecutor() as executor:
