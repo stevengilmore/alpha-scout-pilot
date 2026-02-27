@@ -73,4 +73,105 @@ def get_intel(tickers, is_crypto=False):
                 })
         except: continue
     if not data: return pd.DataFrame()
-    # SORTING: AI Favor first, then Institutional Score [cite: 3.4
+    # SORTING: AI Favor first, then Institutional Score
+    return pd.DataFrame(data).sort_values(by=["rank", "Score"], ascending=[False, True]).drop(columns=["rank"]).head(6)
+
+# --- 3. UI LAYOUT ---
+st.set_page_config(page_title="Alpha Scout Command", layout="wide")
+
+try:
+    fng = session.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata", headers=HEADERS).json()['fear_and_greed']
+    val, text = int(fng['score']), fng['rating'].upper()
+except: val, text = 50, "NEUTRAL"
+
+c1, c2 = st.columns([3, 1])
+with c1:
+    st.title("🛰️ Alpha Scout: Global Command")
+    st.caption(f"Sync: {datetime.now().strftime('%H:%M')} | Key Status: ACTIVE")
+with c2:
+    st.metric(f"SENTIMENT: {text}", f"{val}/100")
+    st.progress(val / 100)
+
+st.divider()
+
+# --- 4. THE QUAD-GRID ---
+row1 = st.columns(2)
+row2 = st.columns(2)
+indices = [("S&P 500", row1[0]), ("Nasdaq-100", row1[1]), ("DAX", row2[0]), ("Top Crypto", row2[1])]
+all_top_tickers = []
+
+with st.spinner("Syncing markets..."):
+    for idx_name, col in indices:
+        with col:
+            st.subheader(f"🏛️ {idx_name}")
+            df = get_intel(get_tickers(idx_name), is_crypto=(idx_name == "Top Crypto"))
+            if not df.empty:
+                st.dataframe(df.style.map(lambda v: f"color: {'#00ff00' if v > 0 else '#ff4b4b'}", subset=['Upside %']), 
+                             use_container_width=True, hide_index=True)
+                all_top_tickers.extend(df.to_dict('records'))
+
+st.divider()
+
+# --- 5. AI TOP PICK (ROBUST) ---
+st.subheader("🌟 AI Top Pick for Today")
+high_favor = [t for t in all_top_tickers if "HIGH" in str(t['AI Favor'])]
+top_list = high_favor if high_favor else all_top_tickers
+
+if top_list and client:
+    top_one = max(top_list, key=lambda x: x['Upside %'])
+    
+    @st.cache_data(ttl=3600)
+    def get_reason(ticker, name):
+        for m in MODELS_TO_TRY:
+            try:
+                res = client.models.generate_content(model=m, contents=f"Why is {name} ({ticker}) a top pick? 1 sentence.")
+                return f"{res.text.strip()}"
+            except: continue
+        return "Asset with sector-leading institutional conviction and growth metrics."
+    
+    st.success(f"**{top_one['Company']} ({top_one['Ticker']})** — {get_reason(top_one['Ticker'], top_one['Company'])}")
+
+st.divider()
+
+# --- 6. SIMULTANEOUS COMMITTEE AUDIT ---
+st.subheader("🤖 AI Committee Deep-Dive")
+if all_top_tickers:
+    ticker_map = {f"{r['Ticker']} - {r['Company']}": r for r in all_top_tickers}
+    sel_label = st.selectbox("Select asset to audit:", options=list(ticker_map.keys()))
+    sel_data = ticker_map[sel_label]
+
+    if st.button("🚀 RUN RAPID AUDIT"):
+        with st.status("Council is debating...") as status:
+            def robust_agent_call(name, role):
+                for m in MODELS_TO_TRY:
+                    try:
+                        res = client.models.generate_content(
+                            model=m, 
+                            contents=f"Audit {sel_data['Company']} ({sel_data['Ticker']}). Data: {yf.Ticker(sel_data['Ticker']).info}",
+                            config=types.GenerateContentConfig(system_instruction=role)
+                        )
+                        return name, res.text, m
+                    except: continue
+                return name, "Critical failure: Gemini Models unavailable.", "NONE"
+
+            outputs = []
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = [executor.submit(robust_agent_call, n, r) for n, r in AGENT_ROLES.items()]
+                for f in concurrent.futures.as_completed(futures):
+                    outputs.append(f.result())
+            
+            cols = st.columns(3)
+            votes = sum(1 for t in outputs if "VOTE: BUY" in t[1].upper())
+            for i, (n, text, model_used) in enumerate(outputs):
+                with cols[i]:
+                    is_buy = "VOTE: BUY" in text.upper()
+                    st.write(f"### {n}")
+                    st.write("✅ **BUY**" if is_buy else "❌ **REJECT**")
+                    with st.expander("Reasoning"): 
+                        st.caption(f"Model: {model_used}")
+                        st.markdown(text.replace("VOTE: BUY", "").replace("VOTE: NO", ""))
+            
+            if votes >= 2:
+                st.success(f"🏆 PASSED ({votes}/3)"); 
+                if votes == 3: confetti()
+            else: st.error(f"🛑 REJECTED ({votes}/3)")
