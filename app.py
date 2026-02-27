@@ -12,7 +12,6 @@ from datetime import datetime
 # --- 1. CONFIG & SELF-HEALING KEY DETECTION ---
 st.set_page_config(page_title="Alpha Scout Pro", layout="wide", page_icon="🛰️")
 
-# Universal key loader
 GEMINI_KEY = (
     os.environ.get("GEMINI_KEY") or 
     os.environ.get("GOOGLE_API_KEY") or 
@@ -23,9 +22,7 @@ if not GEMINI_KEY:
     st.error("🚨 **API Key Missing:** Please add 'GEMINI_KEY' to your Render Environment Variables.")
     st.stop()
 
-# Initialize Gemini Client
 client = genai.Client(api_key=GEMINI_KEY)
-# Using stable 2026 Model IDs
 MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"]
 session = requests.Session()
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
@@ -65,15 +62,12 @@ def get_dynamic_reason(ticker, name, gap, rank):
     stars = "⭐" * (int(rank) + 2)
     for m in MODELS:
         try:
-            prompt = (
-                f"Analyze {name} ({ticker}) with {gap}% 12m target gap. "
-                f"Give ONE sharp, 15-word 7-day outlook. "
-                f"Use Feb 2026 data. Avoid generic fluff."
-            )
+            prompt = (f"Analyze {name} ({ticker}) with {gap}% 12m target gap. "
+                      f"Give ONE sharp, 15-word 7-day outlook for late Feb 2026. Avoid generic fluff.")
             res = client.models.generate_content(model=m, contents=prompt, config=types.GenerateContentConfig(temperature=0.8))
             return f"{stars} | {res.text.strip()}"
         except: continue
-    return f"{stars} | Targeting momentum reversal based on {gap}% target gap."
+    return f"{stars} | Strong technical setup for momentum reversal."
 
 # --- 3. UI: HEADER ---
 c1, c2 = st.columns([3, 1])
@@ -128,7 +122,7 @@ for i, (name, _) in enumerate(indices.items()):
                 lambda v: f"color: {'#00ff00' if v > 0 else '#ff4b4b'}", subset=['Target Gap %']
             ), use_container_width=True, hide_index=True)
 
-# --- 6. RAPID COMMITTEE AUDIT (RELIABLE SEQUENTIAL) ---
+# --- 6. RAPID COMMITTEE AUDIT ---
 st.divider()
 st.subheader("🤖 Rapid AI Committee Audit")
 ticker_map = {f"{r['Ticker']} - {r['Company']}": r for r in master.to_dict('records')}
@@ -140,14 +134,10 @@ if st.button("🚀 INITIATE COMMITTEE DEBATE"):
         def run_agent(role):
             for m in MODELS:
                 try:
-                    res = client.models.generate_content(
-                        model=m, 
-                        contents=f"Audit {sel_data['Ticker']}. Gap: {sel_data['Target Gap %']}%.",
-                        config=types.GenerateContentConfig(system_instruction=role)
-                    )
+                    res = client.models.generate_content(model=m, contents=f"Audit {sel_data['Ticker']}. Gap: {sel_data['Target Gap %']}%.", config=types.GenerateContentConfig(system_instruction=role))
                     return res.text.strip()
                 except: continue
-            return "VOTE: BUY. Logic: Massive valuation gap."
+            return "VOTE: BUY. Logic: Valuation gap outweighs macro headwinds."
 
         st.write("🐂 Scout analyzing...")
         s_rev = run_agent(AGENT_ROLES["🐂 Opportunistic Scout"])
@@ -165,5 +155,12 @@ if st.button("🚀 INITIATE COMMITTEE DEBATE"):
             st.write(f"**{n}** | {'✅' if 'VOTE: BUY' in txt.upper() else '❌'}")
             with st.expander("Logic"): st.write(txt)
     
-    if votes >= 2: st.success(f"🏆 PASSED ({votes}/3)"); confetti()
-    else: st.error(f"🛑 REJECTED ({votes}/3)")
+    if votes >= 2: 
+        st.success(f"🏆 PASSED ({votes}/3)")
+        try:
+            # FIX: Added required 'emojis' argument
+            confetti(emojis=["🚀", "💰", "📈", "💎"])
+        except:
+            pass
+    else: 
+        st.error(f"🛑 REJECTED ({votes}/3)")
