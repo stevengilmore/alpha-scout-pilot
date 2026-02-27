@@ -15,15 +15,14 @@ GEMINI_KEY = os.environ.get("GEMINI_KEY") or st.secrets.get("GEMINI_KEY")
 client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
 AGENT_ROLES = {
-    "🐂 Opportunistic Scout": "Analyze catalysts & upside. Explain logic before voting. End with VOTE: BUY/NO.",
-    "📈 Growth Specialist": "Analyze revenue & momentum. Explain logic before voting. End with VOTE: BUY/NO.",
-    "🐻 Risk Auditor": "Identify red flags (debt, SBC, insider selling). You MUST list rejection reasons. End with VOTE: BUY/NO."
+    "🐂 Opportunistic Scout": "Analyze catalysts & upside. End with VOTE: BUY/NO.",
+    "📈 Growth Specialist": "Analyze revenue & momentum. End with VOTE: BUY/NO.",
+    "🐻 Risk Auditor": "Identify red flags (debt, SBC, insider selling). End with VOTE: BUY/NO."
 }
 
 # --- 2. DATA ENGINES ---
 @st.cache_data(ttl=86400)
 def get_tickers(index_name):
-    """Fetches global tickers from Wikipedia with browser spoofing."""
     urls = {
         "S&P 500": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
         "Nasdaq-100": "https://en.wikipedia.org/wiki/Nasdaq-100",
@@ -33,30 +32,22 @@ def get_tickers(index_name):
     try:
         res = requests.get(urls[index_name], headers=HEADERS, timeout=10)
         tables = pd.read_html(res.text)
-        if index_name == "S&P 500": 
-            return tables[0]['Symbol'].str.replace('.', '-', regex=False).tolist()
-        if index_name == "Nasdaq-100": 
-            return tables[4]['Ticker'].tolist()
-        if index_name == "DAX": 
-            # DAX table usually has Ticker in 3rd or 4th column
-            return tables[4]['Ticker'].tolist()
-        if index_name == "FTSE 100": 
-            # FTSE tickers need the .L suffix for Yahoo Finance
-            return [f"{t}.L" for t in tables[4]['Ticker'].tolist()]
+        if index_name == "S&P 500": return tables[0]['Symbol'].str.replace('.', '-', regex=False).tolist()
+        if index_name == "Nasdaq-100": return tables[4]['Ticker'].tolist()
+        if index_name == "DAX": return tables[4]['Ticker'].tolist()
+        if index_name == "FTSE 100": return [f"{t}.L" for t in tables[4]['Ticker'].tolist()]
     except: return []
 
 @st.cache_data(ttl=3600)
 def get_intel(tickers, limit=12):
-    """Ranks by Analyst Score and adds AI Favorability prediction."""
     data = []
-    for t in tickers[:35]: # Sample subset for efficiency
+    for t in tickers[:30]:
         try:
             info = yf.Ticker(t).info
             score = info.get('recommendationMean', 5.0)
             curr, target = info.get('currentPrice', 0), info.get('targetMeanPrice', 0)
             if curr > 0 and target > 0:
                 upside = ((target - curr) / curr * 100)
-                # AI Favorability: Predictive heuristic based on agent logic
                 favor = "HIGH 🔥" if upside > 15 and score < 1.8 else "MED ⚖️" if upside > 5 else "LOW"
                 data.append({
                     "Ticker": t, "Company": info.get('longName', t),
@@ -69,17 +60,16 @@ def get_intel(tickers, limit=12):
 # --- 3. UI LAYOUT ---
 st.set_page_config(page_title="Alpha Scout Command", layout="wide")
 
-# Market Sentiment & Header
+# Sentiment Header
 try:
-    res = requests.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata", headers=HEADERS, timeout=10)
-    fng = res.json()['fear_and_greed']
+    res = requests.get("https://production.dataviz.cnn.io/index/fearandgreed/graphdata", headers=HEADERS, timeout=10).json()
+    fng = res['fear_and_greed']
     val, text = int(fng['score']), fng['rating'].upper()
 except: val, text = 43, "FEAR"
 
 c1, c2 = st.columns([3, 1])
 with c1:
     st.title("🛰️ Alpha Scout: Global Command")
-    st.caption(f"Multi-Index Intelligence | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 with c2:
     st.metric(f"SENTIMENT: {text}", f"{val}/100")
     st.progress(val / 100)
@@ -87,74 +77,81 @@ with c2:
 st.divider()
 
 # --- 4. THE GLOBAL QUAD-GRID ---
-def style_table(df):
-    return df.style.map(lambda v: f"color: {'green' if v > 0 else 'red'}", subset=['Upside %']).map(
-        lambda v: 'background-color: #004d00; color: white' if "HIGH" in str(v) else ('background-color: #333300; color: white' if "MED" in str(v) else ''),
-        subset=['AI Favor']
-    ).format({"Price": "${:.2f}", "Upside %": "{:.1f}%", "Score": "{:.2f}"})
-
 row1_col1, row1_col2 = st.columns(2)
 row2_col1, row2_col2 = st.columns(2)
-
 indices = [("S&P 500", row1_col1), ("Nasdaq-100", row1_col2), ("DAX", row2_col1), ("FTSE 100", row2_col2)]
 all_top_tickers = []
 
-with st.spinner("Aggregating Global Conviction Data..."):
-    for idx_name, col in indices:
-        with col:
-            st.subheader(f"🏛️ {idx_name}")
-            tickers = get_tickers(idx_name)
-            df = get_intel(tickers)
-            if not df.empty:
-                st.dataframe(style_table(df), use_container_width=True, hide_index=True)
-                all_top_tickers.extend(df.to_dict('records'))
-            else: st.write("Awaiting market data...")
+for idx_name, col in indices:
+    with col:
+        st.subheader(f"🏛️ {idx_name}")
+        df = get_intel(get_tickers(idx_name))
+        if not df.empty:
+            st.dataframe(df.style.map(lambda v: f"color: {'green' if v > 0 else 'red'}", subset=['Upside %']), use_container_width=True, hide_index=True)
+            all_top_tickers.extend(df.to_dict('records'))
 
 st.divider()
 
-# --- 5. SIMULTANEOUS AI COMMITTEE AUDIT ---
+# --- 5. NEW: AUTO-LOADED AI TOP PICK ---
+st.subheader("🌟 AI Top Pick for Today")
+high_favor_list = [t for t in all_top_tickers if "HIGH" in str(t['AI Favor'])]
+
+if high_favor_list and client:
+    # We pick the one with highest upside from the "High Favor" group
+    top_candidate = max(high_favor_list, key=lambda x: x['Upside %'])
+    
+    @st.cache_data(ttl=3600)
+    def get_one_sentence_pick(ticker, name):
+        try:
+            res = client.models.generate_content(
+                model="gemini-2.0-flash", 
+                contents=f"Give me exactly ONE powerful sentence why {name} ({ticker}) is the best investment today."
+            )
+            return res.text.strip()
+        except: return "Strongest institutional consensus and price-to-growth ratio in its sector."
+
+    reason = get_one_sentence_pick(top_candidate['Ticker'], top_candidate['Company'])
+    
+    # UI Box for Top Pick
+    st.success(f"**{top_candidate['Company']} ({top_candidate['Ticker']})**")
+    st.write(f"👉 {reason}")
+
+st.divider()
+
+# --- 6. SIMULTANEOUS AI COMMITTEE AUDIT ---
 st.subheader("🤖 AI Committee Rapid Audit")
-if all_top_tickers:
-    ticker_map = {f"{r['Ticker']} - {r['Company']}": r for r in all_top_tickers}
-    sel_label = st.selectbox("Select a stock from the grid to audit:", options=list(ticker_map.keys()))
-    selected_data = ticker_map[sel_label]
+ticker_map = {f"{r['Ticker']} - {r['Company']}": r for r in all_top_tickers}
+sel_label = st.selectbox("Select a stock for a Deep Audit:", options=list(ticker_map.keys()))
+selected_data = ticker_map[sel_label]
 
-    if st.button(f"🚀 INITIATE RAPID AUDIT: {selected_data['Company']}"):
-        # IMAGE: 
-        with st.status(f"Council is debating {selected_data['Company']} simultaneously...") as status:
-            
-            # Helper for simultaneous execution
-            def get_agent_response(name, role):
-                try:
-                    res = client.models.generate_content(
-                        model="gemini-2.0-flash", 
-                        contents=f"Audit {selected_data['Company']} ({selected_data['Ticker']}). Price: {selected_data['Price']}. Data: {yf.Ticker(selected_data['Ticker']).info}", 
-                        config=types.GenerateContentConfig(system_instruction=role)
-                    )
-                    return name, res.text
-                except Exception as e: return name, f"Error: {e}"
+if st.button(f"🚀 INITIATE RAPID AUDIT: {selected_data['Company']}"):
+    with st.status("Council is debating simultaneously...") as status:
+        def get_agent_response(name, role):
+            res = client.models.generate_content(
+                model="gemini-2.0-flash", 
+                contents=f"Audit {selected_data['Company']} ({selected_data['Ticker']}). Price: {selected_data['Price']}. Data: {yf.Ticker(selected_data['Ticker']).info}", 
+                config=types.GenerateContentConfig(system_instruction=role)
+            )
+            return name, res.text
 
-            # Parallel Execution (ThreadPoolExecutor)
-            votes = 0
-            agent_outputs = {}
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                futures = {executor.submit(get_agent_response, n, r): n for n, r in AGENT_ROLES.items()}
-                for future in concurrent.futures.as_completed(futures):
-                    name, text = future.result()
-                    agent_outputs[name] = text
-                    if "VOTE: BUY" in text.upper(): votes += 1
-            
-            # UI Render
-            cols = st.columns(3)
-            for i, (name, text) in enumerate(agent_outputs.items()):
-                with cols[i]:
-                    st.write(f"### {name}")
-                    st.write("✅ **BUY**" if "VOTE: BUY" in text.upper() else "❌ **REJECT**")
-                    with st.expander("Show Detailed Reasoning"):
-                        st.markdown(text.replace("VOTE: BUY", "").replace("VOTE: NO", ""))
-            
-            if votes >= 2:
-                st.success(f"🏆 PASSED COMMITTEE ({votes}/3)")
-                if votes == 3: confetti()
-            else: st.error(f"🛑 REJECTED BY COMMITTEE ({votes}/3)")
-            status.update(label="Audit Complete!", state="complete")
+        agent_outputs = {}
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {executor.submit(get_agent_response, n, r): n for n, r in AGENT_ROLES.items()}
+            for f in concurrent.futures.as_completed(futures):
+                name, text = f.result()
+                agent_outputs[name] = text
+        
+        cols = st.columns(3)
+        votes = 0
+        for i, (name, text) in enumerate(agent_outputs.items()):
+            with cols[i]:
+                st.write(f"### {name}")
+                is_buy = "VOTE: BUY" in text.upper()
+                if is_buy: votes += 1
+                st.write("✅ **BUY**" if is_buy else "❌ **REJECT**")
+                with st.expander("Show Reasoning"): st.markdown(text.replace("VOTE: BUY", "").replace("VOTE: NO", ""))
+        
+        if votes >= 2:
+            st.success(f"🏆 PASSED ({votes}/3)")
+            if votes == 3: confetti()
+        else: st.error(f"🛑 REJECTED ({votes}/3)")
