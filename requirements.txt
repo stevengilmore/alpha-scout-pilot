@@ -4,3 +4,5 @@ requests
 google-genai
 pandas
 fear-and-greed
+streamlit-confetti
+lxml
