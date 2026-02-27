@@ -1,107 +1,73 @@
 import os
-import sys
 import streamlit as st
 import yfinance as yf
-import requests
-import pandas as pd
-from fear_and_greed import FearGreedIndex #
 from google import genai
 from google.genai import types
 
-# --- 1. SETUP ---
+# --- 1. THE 5-AGENT COMMITTEE PERSONAS ---
+# Each agent has a distinct "lens" to ensure diversity
+AGENT_ROLES = {
+    "🐂 Value Hunter": "Focus on turnaround potential and 5-year lows. Risk: Moderate.",
+    "📈 Growth Specialist": "Look for revenue growth >20%. Accept higher P/E ratios.",
+    "🐻 Cynical Auditor": "The 'Veto' agent. Look for debt traps, high SBC, or insiders selling.",
+    "🌍 Macro Strategist": "Analyze sector trends and how 'Fear & Greed' affects this specific stock.",
+    "⚖️ Governance Pro": "Focus on management quality and institutional ownership trends."
+}
+
 def get_secret(key):
-    val = os.environ.get(key)
-    if val: return val
-    try:
-        if key in st.secrets: return st.secrets[key]
-    except: pass
-    return None
+    return os.environ.get(key) or st.secrets.get(key)
 
 GEMINI_KEY = get_secret("GEMINI_KEY")
 client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
-WATCHLIST = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA", "PYPL", "DIS", "F", "INTC", "BABA", "PLTR", "SQ"]
-
-# --- 2. SENTIMENT & MARKET DATA ---
-@st.cache_data(ttl=3600)
-def get_market_sentiment():
-    """Fetches CNN Fear & Greed Index"""
-    try:
-        # Returns (value, description, last_update)
-        data = FearGreedIndex().get() 
-        return {
-            "value": int(data.value),
-            "feeling": data.description.upper(),
-            "update": data.last_update.strftime("%Y-%m-%d")
-        }
-    except:
-        return {"value": 50, "feeling": "NEUTRAL", "update": "N/A"}
-
-@st.cache_data(ttl=3600)
-def get_top_12_analysts(tickers):
-    data_list = []
-    for t in tickers:
-        try:
-            stock = yf.Ticker(t)
-            info = stock.info
-            curr = info.get('currentPrice', 0)
-            target = info.get('targetMeanPrice', 0)
-            upside = ((target - curr) / curr) * 100 if curr > 0 and target > 0 else 0
-            
-            data_list.append({
-                "Ticker": t,
-                "Name": info.get('longName', t),
-                "Price": curr,
-                "Target": target,
-                "Upside %": round(upside, 2),
-                "Rating": info.get('recommendationMean', 5.0) # 1=Strong Buy, 5=Sell
-            })
-        except: continue
-    return pd.DataFrame(data_list).sort_values("Rating").head(12)
-
-# --- 3. UI LAYOUT ---
-st.set_page_config(page_title="Alpha Scout Pro", layout="wide")
-
-# HEADER: MARKET SENTIMENT
-sentiment = get_market_sentiment()
-col_title, col_fng = st.columns([2, 1])
-
-with col_title:
-    st.title("🛰️ Alpha Scout: Command Center")
-    st.caption(f"Last Market Intel Refresh: {sentiment['update']}")
-
-with col_fng:
-    # Color mapping for sentiment
-    color = "red" if sentiment['value'] < 40 else "orange" if sentiment['value'] < 60 else "green"
-    st.metric(label=f"FEAR & GREED: {sentiment['feeling']}", value=sentiment['value'], delta_color="normal")
-    st.progress(sentiment['value'] / 100) # Visual bar
-
-st.divider()
-
-# SECTION 1: TOP 12 ANALYST RANKINGS
-st.header("📊 Wall Street Consensus: Top 12")
-with st.spinner("Ranking analysts' top picks..."):
-    df = get_top_12_analysts(WATCHLIST)
-    def style_upside(v):
-        return f"color: {'green' if v > 0 else 'red'}; font-weight: bold"
+# --- 2. AUDIT LOGIC (3/5 PASS) ---
+def run_5_agent_audit(ticker, data):
+    votes = 0
+    debate_details = []
     
-    st.dataframe(
-        df.style.map(style_upside, subset=['Upside %']).format({"Price":"${:.2f}", "Target":"${:.2f}", "Upside %":"{:.1f}%"}),
-        use_container_width=True, hide_index=True
-    )
+    for name, instruction in AGENT_ROLES.items():
+        # Using Gemini 2.0 Flash Thinking for deep reasoning
+        config = types.GenerateContentConfig(
+            system_instruction=f"{instruction} End your analysis with 'VOTE: BUY' or 'VOTE: NO'.",
+            thinking_config=types.ThinkingConfig(include_thoughts=True) # Enables transparency
+        )
+        try:
+            res = client.models.generate_content(
+                model="gemini-2.0-flash-thinking-exp-01-21", 
+                contents=f"Audit {ticker} using this data: {data}", 
+                config=config
+            )
+            is_buy = "VOTE: BUY" in res.text.upper()
+            if is_buy: votes += 1
+            
+            debate_details.append({
+                "agent": name,
+                "vote": "✅ BUY" if is_buy else "❌ NO",
+                "reasoning": res.text.split("VOTE:")[0] # Capture the 'Why'
+            })
+        except:
+            debate_details.append({"agent": name, "vote": "⚠️ ERROR", "reasoning": "Agent timed out."})
+            
+    return votes, debate_details
 
-st.divider()
+# --- 3. UI DASHBOARD ---
+st.set_page_config(layout="wide")
+st.title("🛰️ Alpha Scout: 5-Agent Committee")
 
-# SECTION 2: AI AUDIT
-st.header("🤖 Multi-Agent Committee Audit")
-if st.button("🚀 RUN LIVE AGENT DEBATE"):
-    with st.status("Agents are debating..."):
-        # Audit top picks from the analyst list
-        results = []
-        for t in df['Ticker'].head(6): 
-            try:
-                res = client.models.generate_content(model="gemini-2.0-flash", contents=f"Audit {t}")
-                vote = "BUY" if "BUY" in res.text.upper() else "HOLD/NO"
-                results.append({"Ticker": t, "Committee Vote": vote})
-            except: continue
-        st.table(results)
+# Logic to display 3/5 results
+if st.button("🚀 RUN 5-AGENT AUDIT"):
+    ticker = "PYPL" # Example
+    stock_data = yf.Ticker(ticker).info
+    
+    votes, details = run_5_agent_audit(ticker, stock_data)
+    
+    # 3 out of 5 Threshold
+    if votes >= 3:
+        st.success(f"🏆 {ticker} PASSED (Vote: {votes}/5)")
+    else:
+        st.error(f"🛑 {ticker} REJECTED (Vote: {votes}/5)")
+
+    # Display individual reasoning
+    for d in details:
+        with st.expander(f"{d['agent']} - {d['vote']}"):
+            st.write(d['reasoning'])
