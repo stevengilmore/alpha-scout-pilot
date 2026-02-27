@@ -12,7 +12,6 @@ from datetime import datetime
 # --- 1. CONFIG & SELF-HEALING KEY DETECTION ---
 st.set_page_config(page_title="Alpha Scout Pro", layout="wide", page_icon="🛰️")
 
-# Universal key loader (Render Environment + Streamlit Secrets)
 GEMINI_KEY = (
     os.environ.get("GEMINI_KEY") or 
     os.environ.get("GOOGLE_API_KEY") or 
@@ -20,7 +19,7 @@ GEMINI_KEY = (
 )
 
 if not GEMINI_KEY:
-    st.error("🚨 **API Key Missing:** Please add 'GEMINI_KEY' to your Render Environment Variables.")
+    st.error("🚨 **API Key Missing:** Please add 'GEMINI_KEY' to Render Environment Variables.")
     st.stop()
 
 client = genai.Client(api_key=GEMINI_KEY)
@@ -39,49 +38,49 @@ def get_intel(tickers, is_crypto=False):
             info = tk.info
             score = info.get('recommendationMean', 2.0 if is_crypto else 3.0)
             curr = info.get('regularMarketPrice') or info.get('currentPrice')
+            # 12-Month Target Gap calculation
             target = info.get('targetMeanPrice', curr * 1.25 if is_crypto else 0)
             
             if curr:
-                upside = ((target - curr) / curr * 100) if target else 0
-                rank = 3 if (upside > 15 and score < 2.2) else 2 if upside > 5 else 1
+                target_gap = ((target - curr) / curr * 100) if target else 0
+                rank = 3 if (target_gap > 15 and score < 2.2) else 2 if target_gap > 5 else 1
                 data.append({
                     "Ticker": t, "Company": info.get('shortName') or t,
-                    "Price": curr, "Upside %": round(upside, 1),
-                    "Score": score, "AI Favor": "HIGH 🔥" if rank == 3 else "MED ⚖️" if rank == 2 else "LOW",
-                    "rank": rank
+                    "Price": curr, "Target Gap %": round(target_gap, 1),
+                    "Score": score, "rank": rank
                 })
         except: continue
     df = pd.DataFrame(data)
     return df.sort_values(["rank", "Score"], ascending=[False, True]).head(6) if not df.empty else df
 
 @st.cache_data(ttl=3600)
-def get_dynamic_reason(ticker, name, upside, rank):
-    """Fetches unique, non-generic AI rationale for each stock."""
-    stars = "⭐" * (int(rank) + 2)
+def get_dynamic_reason(ticker, name, gap, rank):
+    """Fetches unique, stock-specific 7-day outlooks."""
     for m in MODELS:
         try:
             prompt = (
-                f"Analyze {name} ({ticker}) with {upside}% upside. "
-                f"Give ONE sharp, 15-word reason for its 7-day outlook. "
-                f"Reference current Feb 2026 catalysts (chips, supply chain, or macro). "
-                f"Do not be generic."
+                f"Analyze {name} ({ticker}) with a {gap}% 12-month target gap. "
+                f"Give ONE sharp, 15-word 7-day outlook. "
+                f"Reference current Feb 2026 catalysts. Avoid generic 'accumulation' talk."
             )
             res = client.models.generate_content(
                 model=m, contents=prompt, 
                 config=types.GenerateContentConfig(temperature=0.8)
             )
-            return f"{stars} | {res.text.strip()}"
+            return res.text.strip()
         except: continue
-    return f"{stars} | Targeting momentum breakout based on {upside}% price-to-target gap."
+    return "Massive price-to-target mismatch suggests high recovery probability."
 
-# --- 3. UI: HEADER & GLOBAL GRID ---
+# --- 3. UI: HEADER ---
 c1, c2 = st.columns([3, 1])
 with c1:
-    st.title("🛰️ Alpha Scout: Global Command")
-    st.caption(f"Institutional Intelligence Sync: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    st.title("🛰️ Alpha Scout: Intelligence Command")
+    st.caption(f"Sync: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Institutional Targets: 12-Month Horizon")
 with c2:
-    if st.button("🔄 Refresh Data"): st.cache_data.clear()
+    if st.button("🔄 Refresh Market Data"): st.cache_data.clear()
 
+# --- 4. THE POWER PANEL: TOP 5 SELECTIONS ---
+# We run this BEFORE the grid so the 'Wow' factor hits first
 indices = {
     "S&P 500": ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"],
     "Nasdaq-100": ["TSLA", "META", "AVGO", "COST", "NFLX"],
@@ -90,46 +89,52 @@ indices = {
 }
 
 all_data = []
-with st.spinner("Processing Global Sentiment..."):
-    cols = st.columns(4)
-    for i, (name, t_list) in enumerate(indices.items()):
+with st.spinner("Processing Global Signals..."):
+    for name, t_list in indices.items():
         df = get_intel(t_list, is_crypto=(name == "Top Crypto"))
-        if not df.empty:
-            all_data.append(df)
-            with cols[i]:
-                st.subheader(f"🏛️ {name}")
-                st.dataframe(df.drop(columns=['rank']).style.map(
-                    lambda v: f"color: {'#00ff00' if v > 0 else '#ff4b4b'}", subset=['Upside %']
-                ), use_container_width=True, hide_index=True)
+        if not df.empty: all_data.append(df)
 
-# --- 4. THE POWER PANEL: TOP 5 SELECTIONS ---
-st.divider()
-st.subheader("🌟 Top 5 AI Power Selections")
-
+st.subheader("🌟 Top 5 High-Conviction Selections")
 if all_data:
-    master = pd.concat(all_data).sort_values(["rank", "Upside %"], ascending=False).head(5)
+    master = pd.concat(all_data).sort_values(["rank", "Target Gap %"], ascending=False).head(5)
     for i, (_, row) in enumerate(master.iterrows()):
         with st.container(border=True):
             k1, k2, k3 = st.columns([1, 1.5, 4])
             with k1:
                 st.write(f"### #{i+1}")
                 st.title(row['Ticker'])
+                st.write("⭐" * (int(row['rank']) + 2))
             with k2:
-                st.metric("7-Day Upside", f"+{row['Upside %']}%")
-                st.write(f"Price: **${row['Price']}**")
+                st.metric("12M Target Gap", f"{row['Target Gap %']}%")
+                st.caption(f"Price: ${row['Price']}")
             with k3:
-                st.write("**Intelligence Rationale**")
-                reason = get_dynamic_reason(row['Ticker'], row['Company'], row['Upside %'], row['rank'])
+                st.write("**AI 7-Day Intelligence Rationale**")
+                reason = get_dynamic_reason(row['Ticker'], row['Company'], row['Target Gap %'], row['rank'])
                 st.info(reason)
 
-# --- 5. RAPID COMMITTEE AUDIT ---
+st.divider()
+
+# --- 5. GLOBAL GRID ---
+st.subheader("📊 Global Market Sentiment")
+grid_cols = st.columns(4)
+for i, (name, _) in enumerate(indices.items()):
+    with grid_cols[i]:
+        st.write(f"**{name}**")
+        # Use the list we already fetched to save time
+        idx_df = all_data[i] if i < len(all_data) else pd.DataFrame()
+        if not idx_df.empty:
+            st.dataframe(idx_df.drop(columns=['rank']).style.map(
+                lambda v: f"color: {'#00ff00' if v > 0 else '#ff4b4b'}", subset=['Target Gap %']
+            ), use_container_width=True, hide_index=True)
+
+# --- 6. RAPID COMMITTEE AUDIT ---
 st.divider()
 st.subheader("🤖 Rapid Committee Audit")
 ticker_map = {f"{r['Ticker']} - {r['Company']}": r for r in master.to_dict('records')}
 sel = st.selectbox("Deep-audit selection:", options=list(ticker_map.keys()))
 sel_data = ticker_map[sel]
 
-if st.button("🚀 INITIATE DEBATE"):
+if st.button("🚀 INITIATE COMMITTEE DEBATE"):
     with st.status("Agents debating...") as status:
         def agent_call(name, role):
             for m in MODELS:
