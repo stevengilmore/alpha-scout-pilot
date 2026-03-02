@@ -91,12 +91,12 @@ with st.sidebar:
     
     st.divider()
     st.markdown("### 🚀 Terminal Intent")
-    st.write("Generating 30-day tactical swing plans using real-time momentum & AI reasoning.")
+    st.write("Generating tactical swing plans - for your chosen period - using real-time momentum & AI reasoning.")
     st.warning("⚠️ **Disclaimer:** For educational use only. High risk involved.")
     st.markdown("[🔗 Open Google AI Studio](https://aistudio.google.com/)")
 
 # --- 4. DASHBOARD HEADER ---
-st.title("🛸 High-Conviction 30-Day Execution")
+st.title("🛸 High-Conviction Execution")
 
 pulse_list = ["NVDA", "BTC-USD", "SOL-USD", "MU", "TSLA"]
 pulse_df = get_stock_data(pulse_list)
@@ -109,7 +109,7 @@ if not pulse_df.empty:
 st.divider()
 
 # --- 5. SWING GENERATOR ---
-if st.button("🔥 GENERATE 30-DAY ACTION PLAN"):
+if st.button("🔥 GENERATE YOUR ACTION PLAN"):
     pool_list = ["NVDA", "MU", "APP", "TSLA", "PLTR", "SOL-USD", "BTC-USD", "MSTR", "AMZN", "LITE"]
     
     with st.spinner("Analyzing current momentum regime..."):
@@ -131,7 +131,7 @@ if st.button("🔥 GENERATE 30-DAY ACTION PLAN"):
                     st.metric("30D Momentum", f"{row['Momentum']:.1f}%")
 
             st.divider()
-            st.subheader("📑 4-Week Strategic Roadmap")
+            st.subheader("📑 Your Strategic Roadmap")
             if client:
                 portfolio_names = top_picks['Name'].tolist()
                 prompt = (f"As Momentum Master trader, provide a week-by-week strategy for {portfolio_names} "
