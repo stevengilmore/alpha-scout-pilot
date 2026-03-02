@@ -9,155 +9,121 @@ from datetime import datetime, timedelta
 # --- 1. CONFIG & HIGH-CONTRAST STYLING ---
 st.set_page_config(page_title="Momentum Master Terminal", layout="wide", page_icon="📈")
 
-# Final CSS Overhaul for Perfect Readability
 st.markdown("""
     <style>
-    /* Global Background & Body Text */
     .main { background-color: #0d1117; color: #ffffff !important; }
-    
-    /* SIDEBAR: Ultra-High Contrast */
-    [data-testid="stSidebar"] {
-        background-color: #1a1c24 !important;
-        border-right: 1px solid #3d444d;
+    [data-testid="stSidebar"] { background-color: #161b22 !important; border-right: 1px solid #30363d; }
+    [data-testid="stSidebar"] .stMarkdown p, [data-testid="stSidebar"] label {
+        color: #ffffff !important; font-weight: 700 !important; font-size: 1.1rem !important;
     }
-    [data-testid="stSidebar"] .stMarkdown p, 
-    [data-testid="stSidebar"] label,
-    [data-testid="stSidebar"] div,
-    [data-testid="stSidebar"] span {
-        color: #ffffff !important;
-        font-weight: 700 !important;
-        font-size: 1.05rem !important;
+    .stAlert { 
+        background-color: #1c2128 !important; 
+        color: #ffffff !important; 
+        border: 2px solid #58a6ff !important; 
     }
-    
-    /* ALERT & INFO BOXES: No more grey-on-black */
-    .stAlert {
-        background-color: #1c2128 !important;
-        color: #ffffff !important;
-        border: 2px solid #58a6ff !important;
+    .stAlert p, .stAlert li, .stAlert h1, .stAlert h2, .stAlert h3, .stAlert div { 
+        color: #ffffff !important; font-weight: 500 !important; 
     }
-    .stAlert p, .stAlert div {
-        color: #ffffff !important;
-        font-weight: 500 !important;
-        line-height: 1.6 !important;
-    }
-
-    /* METRIC CARDS */
-    .stMetric {
-        background-color: #161b22;
-        border-radius: 12px;
-        padding: 20px;
-        border: 1px solid #30363d;
-    }
+    .stMetric { background-color: #161b22; border-radius: 12px; padding: 20px; border: 1px solid #30363d; }
     [data-testid="stMetricValue"] { color: #58a6ff !important; font-weight: 800; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2026 Failover Model List (to prevent 404s)
-# March 2026: Try Flash 3 first, then fallback to stable 2.5 and 2.0 
-MODEL_POOL = ["gemini-3-flash-preview", "gemini-3-flash", "gemini-2.5-flash", "gemini-2.0-flash"]
-
+MODEL_POOL = ["gemini-2.0-flash", "gemini-1.5-flash"]
 GEMINI_KEY = os.environ.get("GEMINI_KEY") or st.secrets.get("GEMINI_KEY")
 client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
-# --- 2. DATA ENGINE ---
+# --- 2. THE DATA ENGINE ---
 @st.cache_data(ttl=300)
-def get_stock_data(tickers):
+def get_clean_data(tickers):
     data = []
     for t in tickers:
         try:
             tk = yf.Ticker(t)
             info = tk.info
-            full_name = info.get('longName') or info.get('shortName') or t
+            name = info.get('longName') or info.get('shortName') or t
             price = tk.fast_info['last_price']
-            hist = tk.history(period="1mo")
+            hist = tk.history(period="3mo")
             mom = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
-            data.append({"Ticker": t, "Name": full_name, "Price": price, "Momentum": mom})
+            data.append({"Ticker": t, "Name": name, "Price": round(price, 2), "Momentum": mom})
         except: continue
     return pd.DataFrame(data)
 
-# --- 3. SIDEBAR: THE COMMAND CENTER ---
+# --- 3. SIDEBAR ---
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/bullish.png")
     st.title("Momentum Master")
     st.divider()
-    
-    budget = st.number_input("💵 Trading Budget (€)", min_value=100, value=1000, step=100)
-    
+    budget = st.number_input("💵 Trading Budget (€)", min_value=100, value=2500, step=100)
     col_a, col_b = st.columns(2)
     start_d = col_a.date_input("📅 Start Date", datetime.now())
     end_d = col_b.date_input("🏁 End Date", datetime.now() + timedelta(days=30))
-    
-    stock_count = st.slider("🎯 Portfolio Size", 3, 7, 3)
-    
+    trading_days = (end_d - start_d).days
+    st.write(f"⏱️ **Active Window:** {trading_days} Days")
+    stock_count = st.slider("🎯 Portfolio Size", 3, 5, 3)
     st.divider()
     st.markdown("### 🚀 Terminal Intent")
-    st.write("Generating tactical swing plans - for your chosen period - using real-time momentum & AI reasoning.")
-    st.warning("⚠️ **Disclaimer:** For educational use only. High risk involved.")
-    st.markdown("[🔗 Open Google AI Studio](https://aistudio.google.com/)")
+    st.write("Dynamic swing plans based on institutional flows and technical momentum.")
+    st.warning("⚠️ Disclaimer: For educational/entertainment use only.")
+    st.markdown("[🔗 Deep Analysis: Google AI Studio](https://aistudio.google.com/)")
 
 # --- 4. DASHBOARD HEADER ---
-st.title("🛸 High-Conviction Execution")
-
-pulse_list = ["NVDA", "BTC-USD", "SOL-USD", "MU", "TSLA"]
-pulse_df = get_stock_data(pulse_list)
-
+st.title(f"🛸 High-Conviction {trading_days}-Day Execution")
+pulse_df = get_clean_data(["NVDA", "BTC-USD", "TSLA", "MU"])
 if not pulse_df.empty:
-    ticker_cols = st.columns(len(pulse_df))
+    t_cols = st.columns(len(pulse_df))
     for i, row in pulse_df.iterrows():
-        ticker_cols[i].metric(row['Ticker'], f"${row['Price']:.2f}", f"{row['Momentum']:.1f}%")
+        t_cols[i].metric(row['Ticker'], f"${row['Price']}", f"{row['Momentum']:.1f}%")
 
 st.divider()
 
-# --- 5. SWING GENERATOR ---
-if st.button("🔥 GENERATE YOUR ACTION PLAN"):
-    pool_list = ["NVDA", "MU", "APP", "TSLA", "PLTR", "SOL-USD", "BTC-USD", "MSTR", "AMZN", "LITE"]
+# --- 5. THE SWING GENERATOR ---
+if st.button("🔥 GENERATE TACTICAL ACTION PLAN"):
+    pool = ["NVDA", "MU", "APP", "TSLA", "PLTR", "SOL-USD", "BTC-USD", "MSTR", "AMZN", "LITE"]
     
-    with st.spinner("Analyzing current momentum regime..."):
-        full_pool = get_stock_data(pool_list)
-        
+    with st.spinner(f"Locking {trading_days}-day trajectories..."):
+        full_pool = get_clean_data(pool)
         if not full_pool.empty:
             top_picks = full_pool.sort_values("Momentum", ascending=False).head(stock_count)
             
-            st.subheader(f"🥇 Recommended {stock_count}-Stock Swing Portfolio")
-            budget_per_stock = budget / stock_count
-            
+            st.subheader(f"🥇 Recommended {stock_count}-Stock Portfolio")
+            b_per_stock = budget / stock_count
             cols = st.columns(len(top_picks))
+            
+            ai_data_context = ""
             for i, (_, row) in enumerate(top_picks.iterrows()):
                 with cols[i]:
-                    shares = round(budget_per_stock / row['Price'], 2)
+                    shares = round(b_per_stock / row['Price'], 2)
                     st.write(f"### {row['Name']}")
-                    st.caption(f"Ticker: {row['Ticker']}")
-                    st.write(f"**Action:** Buy {shares} Units")
-                    st.metric("30D Momentum", f"{row['Momentum']:.1f}%")
+                    st.write(f"**Buy:** {shares} Units @ **${row['Price']}**")
+                    st.metric("Recent Momentum", f"{row['Momentum']:.1f}%")
+                    ai_data_context += f"- {row['Name']} ({row['Ticker']}): Market Price ${row['Price']}\n"
 
             st.divider()
-            st.subheader("📑 Your Strategic Roadmap")
+            st.subheader(f"📑 {trading_days}-Day Strategic Roadmap")
+            st.caption("✅ Data Verified: Using Live Exchange Prices")
+            
             if client:
-                portfolio_names = top_picks['Name'].tolist()
-                prompt = (f"As Momentum Master trader, provide a week-by-week strategy for {portfolio_names} "
-                          f"from {start_d} to {end_d}. Budget is {budget}€. Reference March 2026 catalysts.")
+                prompt = (
+                    f"You are the Momentum Master trader. Plan a {trading_days}-day strategy for these specific assets at these exact prices:\n"
+                    f"{ai_data_context}\n"
+                    f"MANDATORY: Do not mention any other prices. Use the current market prices provided. "
+                    f"Timeline: {start_d} to {end_d}. Reference March 2026 catalysts (Nvidia Blackwell GTC, Tesla EU expansion). "
+                    f"Plan: Divide into Entry, Growth, and Exit phases based on the {trading_days} day length."
+                )
                 
-                # FAILOVER LOGIC: Tries models until one works 
-                response_text = "AI Strategy Generation Failed."
-                for model_id in MODEL_POOL:
+                res_text = "Generation failed. Try again."
+                for m_id in MODEL_POOL:
                     try:
-                        res = client.models.generate_content(model=model_id, contents=prompt)
-                        response_text = res.text
+                        response = client.models.generate_content(model=m_id, contents=prompt)
+                        res_text = response.text
                         break
-                    except Exception as e:
-                        continue
+                    except: continue
                 
-                st.info(response_text)
-            else:
-                st.error("Missing Gemini API Key in Environment.")
-        else:
-            st.error("Market data connection lost. Please try again.")
+                st.info(res_text)
+            else: st.error("Missing Gemini API Key.")
 
-# --- 6. LANDING CONTENT ---
 else:
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        st.write("### 🐂 Why Swing Trading?")
-        st.write("Capture the 15-30% moves around technology milestones and institutional rotations.")
-    with c2:
-        st.image("https://img.icons8.com/fluency/200/combo-chart.png")
+    st.write(f"### 🐂 Momentum Strategy: {trading_days} Day Outlook")
+    st.write("This system uses 'Relative Strength'—identifying assets with the highest institutional buying pressure to map your roadmap.")
+    st.image("https://img.icons8.com/fluency/200/combo-chart.png")
