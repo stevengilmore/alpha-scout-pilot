@@ -6,34 +6,45 @@ from google import genai
 from google.genai import types
 from datetime import datetime, timedelta
 
-# --- 1. CONFIG & HIGH-CONTRAST STYLING ---
+# --- 1. CONFIG & ULTRA-READABLE STYLING ---
 st.set_page_config(page_title="Momentum Master Terminal", layout="wide", page_icon="📈")
 
 st.markdown("""
     <style>
     .main { background-color: #0d1117; color: #ffffff !important; }
+    
+    /* SIDEBAR: High Contrast */
     [data-testid="stSidebar"] { background-color: #161b22 !important; border-right: 1px solid #30363d; }
     [data-testid="stSidebar"] .stMarkdown p, [data-testid="stSidebar"] label {
         color: #ffffff !important; font-weight: 700 !important; font-size: 1.1rem !important;
     }
+
+    /* THE ROADMAP BOX: Forced White Text */
     .stAlert { 
         background-color: #1c2128 !important; 
         color: #ffffff !important; 
         border: 2px solid #58a6ff !important; 
     }
-    .stAlert p, .stAlert li, .stAlert h1, .stAlert h2, .stAlert h3, .stAlert div { 
-        color: #ffffff !important; font-weight: 500 !important; 
+    /* This targets all levels of text inside the AI generated roadmap */
+    .stAlert p, .stAlert li, .stAlert span, .stAlert div, .stAlert h1, .stAlert h2, .stAlert h3 { 
+        color: #ffffff !important; 
+        font-weight: 500 !important; 
+        opacity: 1 !important;
     }
+
+    /* METRIC CARDS */
     .stMetric { background-color: #161b22; border-radius: 12px; padding: 20px; border: 1px solid #30363d; }
     [data-testid="stMetricValue"] { color: #58a6ff !important; font-weight: 800; }
     </style>
     """, unsafe_allow_html=True)
 
-MODEL_POOL = ["gemini-2.0-flash", "gemini-1.5-flash"]
+# UPDATED MARCH 2026 MODEL POOL
+MODEL_POOL = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash-001"]
+
 GEMINI_KEY = os.environ.get("GEMINI_KEY") or st.secrets.get("GEMINI_KEY")
 client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
-# --- 2. THE DATA ENGINE ---
+# --- 2. DATA ENGINE ---
 @st.cache_data(ttl=300)
 def get_clean_data(tickers):
     data = []
@@ -57,14 +68,14 @@ with st.sidebar:
     budget = st.number_input("💵 Trading Budget (€)", min_value=100, value=2500, step=100)
     col_a, col_b = st.columns(2)
     start_d = col_a.date_input("📅 Start Date", datetime.now())
-    end_d = col_b.date_input("🏁 End Date", datetime.now() + timedelta(days=30))
+    end_d = col_b.date_input("🏁 End Date", datetime.now() + timedelta(days=39))
     trading_days = (end_d - start_d).days
     st.write(f"⏱️ **Active Window:** {trading_days} Days")
     stock_count = st.slider("🎯 Portfolio Size", 3, 5, 3)
     st.divider()
     st.markdown("### 🚀 Terminal Intent")
-    st.write("Dynamic swing plans based on institutional flows and technical momentum.")
-    st.warning("⚠️ Disclaimer: For educational/entertainment use only.")
+    st.write("Generating tactical swing plans based on live market momentum.")
+    st.warning("⚠️ Disclaimer: For educational use only.")
     st.markdown("[🔗 Deep Analysis: Google AI Studio](https://aistudio.google.com/)")
 
 # --- 4. DASHBOARD HEADER ---
@@ -77,7 +88,7 @@ if not pulse_df.empty:
 
 st.divider()
 
-# --- 5. THE SWING GENERATOR ---
+# --- 5. SWING GENERATOR (Hallucination-Proof) ---
 if st.button("🔥 GENERATE TACTICAL ACTION PLAN"):
     pool = ["NVDA", "MU", "APP", "TSLA", "PLTR", "SOL-USD", "BTC-USD", "MSTR", "AMZN", "LITE"]
     
@@ -108,22 +119,24 @@ if st.button("🔥 GENERATE TACTICAL ACTION PLAN"):
                     f"You are the Momentum Master trader. Plan a {trading_days}-day strategy for these specific assets at these exact prices:\n"
                     f"{ai_data_context}\n"
                     f"MANDATORY: Do not mention any other prices. Use the current market prices provided. "
-                    f"Timeline: {start_d} to {end_d}. Reference March 2026 catalysts (Nvidia Blackwell GTC, Tesla EU expansion). "
+                    f"Timeline: {start_d} to {end_d}. Reference March 2026 catalysts (Nvidia GTC, Tesla EU expansion). "
                     f"Plan: Divide into Entry, Growth, and Exit phases based on the {trading_days} day length."
                 )
                 
-                res_text = "Generation failed. Try again."
+                res_text = "Generation failed. Please check your API key and try again."
+                # TRY MODELS UNTIL SUCCESS
                 for m_id in MODEL_POOL:
                     try:
                         response = client.models.generate_content(model=m_id, contents=prompt)
                         res_text = response.text
-                        break
-                    except: continue
+                        if res_text: break
+                    except Exception as e:
+                        continue
                 
                 st.info(res_text)
             else: st.error("Missing Gemini API Key.")
 
 else:
     st.write(f"### 🐂 Momentum Strategy: {trading_days} Day Outlook")
-    st.write("This system uses 'Relative Strength'—identifying assets with the highest institutional buying pressure to map your roadmap.")
+    st.write("Identifying high-conviction assets with institutional buying pressure.")
     st.image("https://img.icons8.com/fluency/200/combo-chart.png")
