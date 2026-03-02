@@ -6,26 +6,42 @@ from google import genai
 from google.genai import types
 from datetime import datetime, timedelta
 
-# --- 1. CORE SETUP & IDENTITY ---
+# --- 1. CORE SETUP & STYLING (Fixed for Readability) ---
 st.set_page_config(page_title="Momentum Master Terminal", layout="wide", page_icon="📈")
 
-# Professional 'Dark Mode' Styling
+# High-Contrast Readability Styling
 st.markdown("""
     <style>
+    /* Main Background and Text */
     .main { background-color: #0e1117; color: #ffffff; }
-    .stMetric { background-color: #161b22; border-radius: 10px; padding: 15px; border: 1px solid #30363d; }
-    [data-testid="stSidebar"] { background-color: #0d1117; }
+    
+    /* SIDEBAR READABILITY FIX */
+    [data-testid="stSidebar"] {
+        background-color: #1a1c24 !important;
+        border-right: 1px solid #3d444d;
+    }
+    [data-testid="stSidebar"] .stMarkdown p, [data-testid="stSidebar"] label {
+        color: #f0f2f6 !important; /* Bright off-white for text */
+        font-weight: 500;
+        font-size: 16px;
+    }
+    
+    /* Metric Boxes Styling */
+    .stMetric {
+        background-color: #161b22;
+        border-radius: 10px;
+        padding: 15px;
+        border: 1px solid #30363d;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# Key Loader
 GEMINI_KEY = os.environ.get("GEMINI_KEY") or st.secrets.get("GEMINI_KEY")
 client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
-# --- 2. LIVE PULSE DATA (Non-Boring Landing) ---
-@st.cache_data(ttl=3600)
+# --- 2. LIVE PULSE DATA ---
+@st.cache_data(ttl=300) # Reduced TTL to keep it fresh
 def get_live_pulse():
-    # March 2026 Power Tickers
     watch_list = ["NVDA", "BTC-USD", "SOL-USD", "MU", "APP", "TSLA"]
     pulse = []
     for t in watch_list:
@@ -41,7 +57,7 @@ def get_live_pulse():
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/bullish.png")
     st.title("Momentum Master")
-    st.write("---")
+    st.divider()
     
     budget = st.number_input("💵 Trading Budget (€)", min_value=100, value=1000, step=100)
     
@@ -52,31 +68,30 @@ with st.sidebar:
     stock_count = st.slider("🎯 Number of Stocks", 3, 7, 3)
     
     st.divider()
-    st.markdown("### 🛰️ Website Intent")
-    st.caption("This terminal uses Gemini 2.0 to synthesize 30-day technical momentum and upcoming catalysts into an actionable swing trading roadmap.")
-    
-    st.warning("⚠️ **Disclaimer:** This AI is for educational and entertainment purposes only. I am not a financial advisor. Trading involves high risk.")
-    
-    st.markdown("[🔗 Deep Logic: Google AI Studio](https://aistudio.google.com/)")
+    st.markdown("### 🛰️ Terminal Intent")
+    st.write("This tool identifies 30-day technical momentum to build an actionable swing roadmap.")
+    st.warning("⚠️ **Disclaimer:** For educational/entertainment use only. Trading involves high risk.")
+    st.markdown("[🔗 Deep Analysis: Google AI Studio](https://aistudio.google.com/)")
 
 # --- 4. DASHBOARD HEADER ---
 st.title("🛸 High-Conviction 30-Day Execution")
-st.write(f"Current Date: **{datetime.now().strftime('%B %d, %Y')}**")
 
-# Live Ticker Tape
+# Live Ticker Tape (With Error Fix)
 pulse_df = get_live_pulse()
-ticker_cols = st.columns(len(pulse_df))
-for i, row in pulse_df.iterrows():
-    ticker_cols[i].metric(row['Asset'], row['Price'], row['24H'])
+if not pulse_df.empty:
+    ticker_cols = st.columns(len(pulse_df)) # len(pulse_df) is now guaranteed > 0
+    for i, row in pulse_df.iterrows():
+        ticker_cols[i].metric(row['Asset'], row['Price'], row['24H'])
+else:
+    st.info("🛰️ Initializing market pulse... Refreshing data.")
 
 st.divider()
 
 # --- 5. SWING GENERATOR LOGIC ---
 if st.button("🔥 GENERATE 30-DAY ACTION PLAN"):
-    # Momentum Pool for March 2026
     pool = ["NVDA", "MU", "APP", "TSLA", "PLTR", "SOL-USD", "BTC-USD", "MSTR", "LITE", "AMZN"]
     
-    with st.spinner("Momentum Master is scanning the tape..."):
+    with st.spinner("Scanning for relative strength..."):
         results = []
         for t in pool:
             try:
@@ -87,51 +102,37 @@ if st.button("🔥 GENERATE 30-DAY ACTION PLAN"):
                 results.append({"Ticker": t, "Price": price, "Momentum": mom})
             except: continue
         
-        top_picks = pd.DataFrame(results).sort_values("Momentum", ascending=False).head(stock_count)
-        
-        # Portfolio Display
-        st.subheader(f"🥇 Recommended {stock_count}-Stock Swing Portfolio")
-        budget_per_stock = budget / stock_count
-        
-        cols = st.columns(stock_count)
-        for i, (_, row) in enumerate(top_picks.iterrows()):
-            with cols[i]:
-                shares = round(budget_per_stock / row['Price'], 2)
-                st.write(f"### {row['Ticker']}")
-                st.write(f"**Action:** Buy {shares} Units")
-                st.metric("30D Momentum", f"{row['Momentum']:.1f}%")
+        if results:
+            top_picks = pd.DataFrame(results).sort_values("Momentum", ascending=False).head(stock_count)
+            
+            # Portfolio Display
+            st.subheader(f"🥇 Recommended {stock_count}-Stock Swing Portfolio")
+            budget_per_stock = budget / stock_count
+            
+            cols = st.columns(len(top_picks))
+            for i, (_, row) in enumerate(top_picks.iterrows()):
+                with cols[i]:
+                    shares = round(budget_per_stock / row['Price'], 2)
+                    st.write(f"### {row['Ticker']}")
+                    st.write(f"**Action:** Buy {shares} Units")
+                    st.metric("30D Momentum", f"{row['Momentum']:.1f}%")
 
-        # Week-by-Week Plan (AI Generated)
-        st.divider()
-        st.subheader("📑 4-Week Strategic Roadmap")
-        
-        if client:
-            prompt = (
-                f"You are the Momentum Master. Generate a week-by-week strategy for: {top_picks['Ticker'].tolist()}. "
-                f"Budget: {budget}€. Window: {start_d} to {end_d}. "
-                f"Reference March 2026 catalysts: Nvidia GTC (March 16), Tesla FSD Europe approval (March 20), and BTC supply halving impact. "
-                f"Week 1: Setup/Entry. Week 2: Catalyst Anticipation. Week 3: Risk Management. Week 4: Exit Strategy."
-            )
-            response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-            st.info(response.text)
+            # Week-by-Week Plan
+            st.divider()
+            st.subheader("📑 4-Week Strategic Roadmap")
+            if client:
+                prompt = (f"Act as 'Momentum Master' swing trader. Create a week-by-week strategy for {top_picks['Ticker'].tolist()} "
+                          f"from {start_d} to {end_d}. Reference specific catalysts like Nvidia GTC or rate decisions.")
+                response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+                st.info(response.text)
         else:
-            st.error("Connect your Gemini API Key in the environment to see the 4-week plan.")
+            st.error("Market data connection lost. Please try again.")
 
-# --- 6. LANDING PAGE CONTENT ---
+# --- 6. LANDING PAGE ---
 else:
     c1, c2 = st.columns([2, 1])
     with c1:
-        st.write("### 🐂 Why Swing Trading in 2026?")
-        st.write("""
-        In a market driven by AI-factories and autonomous robotics, price action moves in **bursts**. 
-        'Buy and Hold' is great, but 'Swing Trading' captures the 15-30% moves that happen 
-        around key regulatory and technology milestones.
-        """)
-        st.markdown("""
-        **How it works:**
-        1. **Select Budget:** We calculate share counts so you don't have to.
-        2. **Set Dates:** Minimum 30-day window for momentum to play out.
-        3. **Analyze:** We combine YFinance data with Gemini's reasoning.
-        """)
+        st.write("### 🐂 Why Swing Trading?")
+        st.write("Capture the 15-30% moves around technology milestones and institutional rotations.")
     with c2:
-        st.image("https://img.icons8.com/fluency/200/bullish.png")
+        st.image("https://img.icons8.com/fluency/200/combo-chart.png")
