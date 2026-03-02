@@ -1,166 +1,137 @@
 import streamlit as st
 import os
-import requests
-import pandas as pd
 import yfinance as yf
-import concurrent.futures
+import pandas as pd
 from google import genai
 from google.genai import types
-from streamlit_confetti import confetti
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# --- 1. CONFIG & SELF-HEALING KEY DETECTION ---
-st.set_page_config(page_title="Alpha Scout Pro", layout="wide", page_icon="🛰️")
+# --- 1. CORE SETUP & IDENTITY ---
+st.set_page_config(page_title="Momentum Master Terminal", layout="wide", page_icon="📈")
 
-GEMINI_KEY = (
-    os.environ.get("GEMINI_KEY") or 
-    os.environ.get("GOOGLE_API_KEY") or 
-    st.secrets.get("GEMINI_KEY")
-)
+# Professional 'Dark Mode' Styling
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; color: #ffffff; }
+    .stMetric { background-color: #161b22; border-radius: 10px; padding: 15px; border: 1px solid #30363d; }
+    [data-testid="stSidebar"] { background-color: #0d1117; }
+    </style>
+    """, unsafe_allow_html=True)
 
-if not GEMINI_KEY:
-    st.error("🚨 **API Key Missing:** Please add 'GEMINI_KEY' to your Render Environment Variables.")
-    st.stop()
+# Key Loader
+GEMINI_KEY = os.environ.get("GEMINI_KEY") or st.secrets.get("GEMINI_KEY")
+client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
-client = genai.Client(api_key=GEMINI_KEY)
-MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"]
-session = requests.Session()
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
-
-AGENT_ROLES = {
-    "🐂 Opportunistic Scout": "Analyze catalysts & upside. End with VOTE: BUY/NO.",
-    "📈 Growth Specialist": "Analyze revenue & momentum. End with VOTE: BUY/NO.",
-    "🐻 Risk Auditor": "Identify red flags (debt, volatility). End with VOTE: BUY/NO."
-}
-
-# --- 2. THE INTELLIGENCE ENGINE ---
+# --- 2. LIVE PULSE DATA (Non-Boring Landing) ---
 @st.cache_data(ttl=3600)
-def get_intel(tickers, is_crypto=False):
-    data = []
-    for t in tickers[:12]:
+def get_live_pulse():
+    # March 2026 Power Tickers
+    watch_list = ["NVDA", "BTC-USD", "SOL-USD", "MU", "APP", "TSLA"]
+    pulse = []
+    for t in watch_list:
         try:
             tk = yf.Ticker(t)
-            info = tk.info
-            score = info.get('recommendationMean', 2.0 if is_crypto else 3.0)
-            curr = info.get('regularMarketPrice') or info.get('currentPrice')
-            target = info.get('targetMeanPrice', curr * 1.25 if is_crypto else 0)
-            
-            if curr:
-                target_gap = ((target - curr) / curr * 100) if target else 0
-                rank = 3 if (target_gap > 15 and score < 2.2) else 2 if target_gap > 5 else 1
-                data.append({
-                    "Ticker": t, "Company": info.get('shortName') or t,
-                    "Price": curr, "Target Gap %": round(target_gap, 1),
-                    "Score": score, "rank": rank
-                })
+            price = tk.fast_info['last_price']
+            change = tk.fast_info['day_change_percent']
+            pulse.append({"Asset": t, "Price": f"${price:.2f}", "24H": f"{change:.2f}%"})
         except: continue
-    df = pd.DataFrame(data)
-    return df.sort_values(["rank", "Score"], ascending=[False, True]).head(6) if not df.empty else df
+    return pd.DataFrame(pulse)
 
-@st.cache_data(ttl=3600)
-def get_dynamic_reason(ticker, name, gap, rank):
-    stars = "⭐" * (int(rank) + 2)
-    for m in MODELS:
-        try:
-            prompt = (f"Analyze {name} ({ticker}) with {gap}% 12m target gap. "
-                      f"Give ONE sharp, 15-word 7-day outlook for late Feb 2026. Avoid generic fluff.")
-            res = client.models.generate_content(model=m, contents=prompt, config=types.GenerateContentConfig(temperature=0.8))
-            return f"{stars} | {res.text.strip()}"
-        except: continue
-    return f"{stars} | Strong technical setup for momentum reversal."
-
-# --- 3. UI: HEADER ---
-c1, c2 = st.columns([3, 1])
-with c1:
-    st.title("🛰️ Alpha Scout: Intelligence Command")
-    st.caption(f"Sync: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Institutional 12M Targets")
-with c2:
-    if st.button("🔄 Refresh Market Data"): st.cache_data.clear()
-
-# --- 4. TOP 5 POWER PANEL ---
-indices = {
-    "S&P 500": ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"],
-    "Nasdaq-100": ["TSLA", "META", "AVGO", "COST", "NFLX"],
-    "DAX (Germany)": ["SAP.DE", "SIE.DE", "ALV.DE", "MBG.DE"],
-    "Top Crypto": ["BTC-USD", "ETH-USD", "SOL-USD", "TAO-USD"]
-}
-
-all_data = []
-with st.spinner("Processing Global Signals..."):
-    for name, t_list in indices.items():
-        df = get_intel(t_list, is_crypto=(name == "Top Crypto"))
-        if not df.empty: all_data.append(df)
-
-st.subheader("🌟 Top 5 High-Conviction Selections")
-if all_data:
-    master = pd.concat(all_data).sort_values(["rank", "Target Gap %"], ascending=False).head(5)
-    for i, (_, row) in enumerate(master.iterrows()):
-        with st.container(border=True):
-            k1, k2, k3 = st.columns([1, 1.5, 4])
-            with k1:
-                st.write(f"### #{i+1}")
-                st.title(row['Ticker'])
-            with k2:
-                st.metric("12M Target Gap", f"{row['Target Gap %']}%")
-                st.caption(f"Price: ${row['Price']}")
-            with k3:
-                st.write("**AI 7-Day Intelligence Rationale**")
-                reason = get_dynamic_reason(row['Ticker'], row['Company'], row['Target Gap %'], row['rank'])
-                st.info(reason)
-
-st.divider()
-
-# --- 5. GLOBAL GRID ---
-st.subheader("📊 Global Market Sentiment")
-grid_cols = st.columns(4)
-for i, (name, _) in enumerate(indices.items()):
-    with grid_cols[i]:
-        st.write(f"**{name}**")
-        idx_df = all_data[i] if i < len(all_data) else pd.DataFrame()
-        if not idx_df.empty:
-            st.dataframe(idx_df.drop(columns=['rank']).style.map(
-                lambda v: f"color: {'#00ff00' if v > 0 else '#ff4b4b'}", subset=['Target Gap %']
-            ), use_container_width=True, hide_index=True)
-
-# --- 6. RAPID COMMITTEE AUDIT ---
-st.divider()
-st.subheader("🤖 Rapid AI Committee Audit")
-ticker_map = {f"{r['Ticker']} - {r['Company']}": r for r in master.to_dict('records')}
-sel = st.selectbox("Deep-audit selection:", options=list(ticker_map.keys()))
-sel_data = ticker_map[sel]
-
-if st.button("🚀 INITIATE COMMITTEE DEBATE"):
-    with st.status(f"Opening war room for {sel_data['Ticker']}...") as status:
-        def run_agent(role):
-            for m in MODELS:
-                try:
-                    res = client.models.generate_content(model=m, contents=f"Audit {sel_data['Ticker']}. Gap: {sel_data['Target Gap %']}%.", config=types.GenerateContentConfig(system_instruction=role))
-                    return res.text.strip()
-                except: continue
-            return "VOTE: BUY. Logic: Valuation gap outweighs macro headwinds."
-
-        st.write("🐂 Scout analyzing...")
-        s_rev = run_agent(AGENT_ROLES["🐂 Opportunistic Scout"])
-        st.write("📈 Growth reviewing...")
-        g_rev = run_agent(AGENT_ROLES["📈 Growth Specialist"])
-        st.write("🐻 Risk hunting...")
-        r_rev = run_agent(AGENT_ROLES["🐻 Risk Auditor"])
-        status.update(label="Audit Complete", state="complete")
-
-    acols = st.columns(3)
-    revs = [("🐂 Scout", s_rev), ("📈 Growth", g_rev), ("🐻 Risk", r_rev)]
-    votes = sum(1 for _, txt in revs if "VOTE: BUY" in txt.upper())
-    for i, (n, txt) in enumerate(revs):
-        with acols[i]:
-            st.write(f"**{n}** | {'✅' if 'VOTE: BUY' in txt.upper() else '❌'}")
-            with st.expander("Logic"): st.write(txt)
+# --- 3. SIDEBAR: USER PARAMETERS ---
+with st.sidebar:
+    st.image("https://img.icons8.com/fluency/96/bullish.png")
+    st.title("Momentum Master")
+    st.write("---")
     
-    if votes >= 2: 
-        st.success(f"🏆 PASSED ({votes}/3)")
-        try:
-            # FIX: Added required 'emojis' argument
-            confetti(emojis=["🚀", "💰", "📈", "💎"])
-        except:
-            pass
-    else: 
-        st.error(f"🛑 REJECTED ({votes}/3)")
+    budget = st.number_input("💵 Trading Budget (€)", min_value=100, value=1000, step=100)
+    
+    col_a, col_b = st.columns(2)
+    start_d = col_a.date_input("📅 Start Date", datetime.now())
+    end_d = col_b.date_input("🏁 End Date", datetime.now() + timedelta(days=30))
+    
+    stock_count = st.slider("🎯 Number of Stocks", 3, 7, 3)
+    
+    st.divider()
+    st.markdown("### 🛰️ Website Intent")
+    st.caption("This terminal uses Gemini 2.0 to synthesize 30-day technical momentum and upcoming catalysts into an actionable swing trading roadmap.")
+    
+    st.warning("⚠️ **Disclaimer:** This AI is for educational and entertainment purposes only. I am not a financial advisor. Trading involves high risk.")
+    
+    st.markdown("[🔗 Deep Logic: Google AI Studio](https://aistudio.google.com/)")
+
+# --- 4. DASHBOARD HEADER ---
+st.title("🛸 High-Conviction 30-Day Execution")
+st.write(f"Current Date: **{datetime.now().strftime('%B %d, %Y')}**")
+
+# Live Ticker Tape
+pulse_df = get_live_pulse()
+ticker_cols = st.columns(len(pulse_df))
+for i, row in pulse_df.iterrows():
+    ticker_cols[i].metric(row['Asset'], row['Price'], row['24H'])
+
+st.divider()
+
+# --- 5. SWING GENERATOR LOGIC ---
+if st.button("🔥 GENERATE 30-DAY ACTION PLAN"):
+    # Momentum Pool for March 2026
+    pool = ["NVDA", "MU", "APP", "TSLA", "PLTR", "SOL-USD", "BTC-USD", "MSTR", "LITE", "AMZN"]
+    
+    with st.spinner("Momentum Master is scanning the tape..."):
+        results = []
+        for t in pool:
+            try:
+                tk = yf.Ticker(t)
+                price = tk.fast_info['last_price']
+                hist = tk.history(period="1mo")
+                mom = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
+                results.append({"Ticker": t, "Price": price, "Momentum": mom})
+            except: continue
+        
+        top_picks = pd.DataFrame(results).sort_values("Momentum", ascending=False).head(stock_count)
+        
+        # Portfolio Display
+        st.subheader(f"🥇 Recommended {stock_count}-Stock Swing Portfolio")
+        budget_per_stock = budget / stock_count
+        
+        cols = st.columns(stock_count)
+        for i, (_, row) in enumerate(top_picks.iterrows()):
+            with cols[i]:
+                shares = round(budget_per_stock / row['Price'], 2)
+                st.write(f"### {row['Ticker']}")
+                st.write(f"**Action:** Buy {shares} Units")
+                st.metric("30D Momentum", f"{row['Momentum']:.1f}%")
+
+        # Week-by-Week Plan (AI Generated)
+        st.divider()
+        st.subheader("📑 4-Week Strategic Roadmap")
+        
+        if client:
+            prompt = (
+                f"You are the Momentum Master. Generate a week-by-week strategy for: {top_picks['Ticker'].tolist()}. "
+                f"Budget: {budget}€. Window: {start_d} to {end_d}. "
+                f"Reference March 2026 catalysts: Nvidia GTC (March 16), Tesla FSD Europe approval (March 20), and BTC supply halving impact. "
+                f"Week 1: Setup/Entry. Week 2: Catalyst Anticipation. Week 3: Risk Management. Week 4: Exit Strategy."
+            )
+            response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            st.info(response.text)
+        else:
+            st.error("Connect your Gemini API Key in the environment to see the 4-week plan.")
+
+# --- 6. LANDING PAGE CONTENT ---
+else:
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        st.write("### 🐂 Why Swing Trading in 2026?")
+        st.write("""
+        In a market driven by AI-factories and autonomous robotics, price action moves in **bursts**. 
+        'Buy and Hold' is great, but 'Swing Trading' captures the 15-30% moves that happen 
+        around key regulatory and technology milestones.
+        """)
+        st.markdown("""
+        **How it works:**
+        1. **Select Budget:** We calculate share counts so you don't have to.
+        2. **Set Dates:** Minimum 30-day window for momentum to play out.
+        3. **Analyze:** We combine YFinance data with Gemini's reasoning.
+        """)
+    with c2:
+        st.image("https://img.icons8.com/fluency/200/bullish.png")
