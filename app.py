@@ -23,8 +23,8 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# UPDATED 2026 MODEL POOL (Removing retired 2.0 models)
-MODEL_POOL = ["gemini-3-flash", "gemini-2.5-flash", "gemini-3.1-flash-lite-preview"]
+# 2026 STABLE MODEL POOL
+MODEL_POOL = ["gemini-3-flash", "gemini-2.5-flash"]
 
 GEMINI_KEY = os.environ.get("GEMINI_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -51,4 +51,87 @@ def get_clean_data(tickers):
             price = tk.fast_info['last_price']
             name = tk.info.get('longName') or t
             hist = tk.history(period="3mo")
-            mom = ((hist['Close
+            # FIXED SYNTAX BELOW
+            mom = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
+            data.append({"Ticker": t, "Name": name, "Price": round(price, 2), "Momentum": mom})
+        except: continue
+    return pd.DataFrame(data)
+
+# --- 3. SIDEBAR ---
+with st.sidebar:
+    st.image("https://img.icons8.com/fluency/96/bullish.png")
+    st.title("Momentum Master")
+    st.divider()
+    budget = st.number_input("💵 Trading Budget (€)", min_value=100, value=2500, step=100)
+    col_a, col_b = st.columns(2)
+    start_d = col_a.date_input("📅 Start", datetime.now())
+    end_d = col_b.date_input("🏁 End", datetime.now() + timedelta(days=39))
+    trading_days = (end_d - start_d).days
+    st.write(f"⏱️ **Active Window:** {trading_days} Days")
+    stock_count = st.slider("🎯 Portfolio Size", 3, 5, 3)
+    st.divider()
+    st.info("💡 Strategic Note: March 2026 focus is on GPU infrastructure and energy resilience.")
+    st.markdown("[🔗 AI Studio](https://aistudio.google.com/)")
+
+# --- 4. DASHBOARD HEADER ---
+st.title(f"🛸 High-Conviction {trading_days}-Day Execution")
+pulse_df = get_clean_data(["NVDA", "BTC-USD", "TSLA", "MU"])
+if not pulse_df.empty:
+    t_cols = st.columns(len(pulse_df))
+    for i, row in pulse_df.iterrows():
+        t_cols[i].metric(row['Ticker'], f"${row['Price']}", f"{row['Momentum']:.1f}%")
+st.divider()
+
+# --- 5. THE SWING GENERATOR ---
+if st.button("🔥 GENERATE TACTICAL ACTION PLAN"):
+    pool = ["NVDA", "MU", "APP", "TSLA", "PLTR", "SOL-USD", "BTC-USD", "MSTR", "AMZN", "LITE"]
+    
+    with st.spinner(f"Analyzing {trading_days}-day trajectories..."):
+        full_pool = get_clean_data(pool)
+        if not full_pool.empty:
+            top_picks = full_pool.sort_values("Momentum", ascending=False).head(stock_count)
+            
+            st.subheader(f"🥇 Recommended {stock_count}-Stock Portfolio")
+            b_per_stock = budget / stock_count
+            cols = st.columns(len(top_picks))
+            
+            ai_data_context = ""
+            telegram_summary = ""
+            for i, (_, row) in enumerate(top_picks.iterrows()):
+                with cols[i]:
+                    shares = round(b_per_stock / row['Price'], 2)
+                    st.write(f"### {row['Name']}")
+                    st.write(f"**Buy:** {shares} Units @ **${row['Price']}**")
+                    st.metric("Momentum Score", f"{row['Momentum']:.1f}%")
+                    ai_data_context += f"- {row['Name']} ({row['Ticker']}): Market Price ${row['Price']}\n"
+                    telegram_summary += f"🟢 {row['Ticker']}: {shares} units @ ${row['Price']}\n"
+
+            st.divider()
+            st.subheader(f"📑 {trading_days}-Day Strategic Roadmap")
+            
+            if client:
+                prompt = (
+                    f"You are the Momentum Master trader. Plan a {trading_days}-day strategy for today, March 4, 2026.\n"
+                    f"PORTFOLIO DATA (MANDATORY PRICES):\n{ai_data_context}\n"
+                    f"WORLD SITUATION: Energy supply volatility and trade tariffs impacting tech. Plan defensively.\n"
+                    f"PLAN: Roadmap from {start_d} to {end_d}. Include Entry, Mid-Window catalysts, and Exit phases."
+                )
+                
+                res_text = "AI Roadmap Generation Failed."
+                for m_id in MODEL_POOL:
+                    try:
+                        response = client.models.generate_content(model=m_id, contents=prompt)
+                        res_text = response.text
+                        if res_text: break
+                    except: continue
+                
+                st.info(res_text)
+                
+                full_msg = f"📅 *Window:* {trading_days} Days\n💰 *Budget:* {budget}€\n\n*PORTFOLIO:*\n{telegram_summary}\n*ROADMAP:*\n{res_text}"
+                send_telegram(full_msg)
+            else: st.error("Missing Gemini API Key.")
+
+else:
+    st.write(f"### 🐂 Momentum Strategy: {trading_days} Day Outlook")
+    st.write("We capture the 'meat' of moves around technology milestones and institutional rotations.")
+    st.image("https://img.icons8.com/fluency/200/combo-chart.png")
